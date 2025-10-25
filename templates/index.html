@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>股票对比展示</title>
+    <link href="https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'Lato', Arial, sans-serif; margin: 40px; }
+        #chart-container { width: 90vw; max-width: 1200px; margin: auto; }
+    </style>
+</head>
+<body>
+    <div id="chart-container">
+        <canvas id="lineChart"></canvas>
+    </div>
+    <script>
+    // 定义增大后的点半径
+    const VISIBLE_POINT_RADIUS = 6;
+    const HOVER_POINT_RADIUS = 8;
+    
+    async function fetchData() {
+        // 假设您的后端接口 /api/lines 返回了所需的数据
+        // 为了方便本地测试，我提供一个虚拟数据结构
+        
+        const resp = await fetch('/api/lines'); 
+        return await resp.json();
+        
+    }
+
+    /**
+     * 根据 priceX 数据计算每个点的半径。
+     * 有 comment 字段的节点显示空心圆，否则为0。
+     * @param {Array<Object|number>} prices - priceX 数组
+     * @returns {Array<number>} - 每个点的半径
+     */
+    function getCommentRadii(prices) {
+        if (!prices || prices.length === 0) return [];
+        // 所有有点评的节点都用同样的半径，最后一个节点不再特殊放大
+        return prices.map((p) => (p && typeof p === 'object' && p.comment) ? VISIBLE_POINT_RADIUS : 0);
+    }
+
+
+    // 使用 Lato 作为 Chart.js 的默认字体
+    if (window.Chart && Chart.defaults) {
+        Chart.defaults.font.family = 'Lato, Arial, sans-serif';
+    }
+
+    function formatLabelTimestr(s) {
+        // 输入类似 '2025-09-26 10:30:00'，输出 'Sep 26 10:30' 形式
+        const d = new Date(s);
+        if (isNaN(d.getTime())) return s; // 使用 getTime() 检查 Date 对象的有效性
+        const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const mon = months[d.getMonth()];
+        const dd = String(d.getDate()).padStart(2, '0');
+        const hh = String(d.getHours()).padStart(2, '0');
+        const min = String(d.getMinutes()).padStart(2, '0');
+        return `${mon} ${dd} ${hh}:${min}`;
+    }
+
+    function renderChart(data) {
+        const ctx = document.getElementById('lineChart').getContext('2d');
+        // 格式化 x 轴标签
+        const formattedLabels = (data.labels || []).map(formatLabelTimestr);
+        // 线的名字和代码映射
+        const meta = data.lineMeta || [
+            {name: '沪深300', code: '000300.XSHG'},
+            {name: '科创50', code: '000688.XSHG'},
+            {name: 'Deepseek', code: 'Deepseek'}
+        ];
+    // 三条线都支持点评节点的空心圆
+    const radii1 = getCommentRadii(data.price1);
+    const radii2 = getCommentRadii(data.price2);
+    const radii3 = getCommentRadii(data.price3);
+
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: formattedLabels,
+                datasets: [
+                    {
+                        label: meta[0].name,
+                        data: data.line1,
+                        borderColor: 'rgba(54,162,235,1)',
+                        backgroundColor: 'rgba(54,162,235,0.1)',
+                        fill: false,
+                        pointRadius: radii1,
+                        pointHoverRadius: function(context) {
+                            // 悬停时该点变大
+                            const radius = context.dataset.pointRadius;
+                            if (Array.isArray(radius)) {
+                                return radius[context.dataIndex] > 0 ? VISIBLE_POINT_RADIUS + 6 : 0;
+                            }
+                            return VISIBLE_POINT_RADIUS + 6;
+                        },
+                        pointStyle: function(context) {
+                            // 悬停时该点为实心，其余为空心
+                            const radius = context.dataset.pointRadius;
+                            const hovered = context.active || false;
+                            // Chart.js 3/4: context.active为true表示悬停
+                            if (Array.isArray(radius) && radius[context.dataIndex] > 0 && context.active) {
+                                return 'circle'; // 实心
+                            }
+                            if (Array.isArray(radius) && radius[context.dataIndex] > 0) {
+                                return 'circle'; // 空心（Chart.js 4已不区分circle/point）
+                            }
+                            return false;
+                        },
+                        customPrices: data.price1,
+                        code: meta[0].code
+                    },
+                    {
+                        label: meta[1].name,
+                        data: data.line2,
+                        borderColor: 'rgba(75,192,192,1)',
+                        backgroundColor: 'rgba(75,192,192,0.1)',
+                        fill: false,
+                        pointRadius: radii2,
+                        pointHoverRadius: function(context) {
+                            const radius = context.dataset.pointRadius;
+                            if (Array.isArray(radius)) {
+                                return radius[context.dataIndex] > 0 ? VISIBLE_POINT_RADIUS + 6 : 0;
+                            }
+                            return VISIBLE_POINT_RADIUS + 6;
+                        },
+                        customPrices: data.price2,
+                        code: meta[1].code
+                    },
+                    {
+                        label: meta[2].name,
+                        data: data.line3,
+                        borderColor: 'rgba(255,99,132,1)',
+                        backgroundColor: 'rgba(255,99,132,0.1)',
+                        fill: false,
+                        pointBackgroundColor: function(context) {
+                            // 悬停时该点为线色，否则为白色
+                            const idx = context.dataIndex;
+                            const active = context.chart.getActiveElements();
+                            if (active && active.length && active[0].datasetIndex === context.datasetIndex && active[0].index === idx) {
+                                return context.dataset.borderColor;
+                            }
+                            return 'white';
+                        },
+                        pointBorderColor: 'rgba(255,99,132,1)',
+                        pointBorderWidth: 2,
+                        customPrices: data.price3,
+                        pointRadius: radii3,
+                        pointHoverRadius: function(context) {
+                            const radius = context.dataset.pointRadius;
+                            if (Array.isArray(radius)) {
+                                return radius[context.dataIndex] > 0 ? VISIBLE_POINT_RADIUS + 6 : 0;
+                            }
+                            return VISIBLE_POINT_RADIUS + 6;
+                        },
+                        code: meta[2].code
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                interaction: {
+                    mode: 'nearest',
+                    intersect: true
+                },
+                hover: {
+                    mode: 'nearest',
+                    intersect: true,
+                    animationDuration: 0
+                },
+                // 保留默认动画（渐入渐出），仅hover时无动画
+                plugins: {
+                    legend: { position: 'top', labels: { font: { size: 16 } } },
+                    tooltip: {
+                        mode: 'nearest',
+                        intersect: true,
+                        callbacks: {
+                            label: function(context) {
+                                const ds = context.dataset;
+                                const idx = context.dataIndex;
+                                const label = ds.label || '';
+                                const val = context.parsed.y;
+                                const price = ds.customPrices ? ds.customPrices[idx] : undefined;
+                                const radii = ds.pointRadius || [];
+                                // 只在有点评节点时显示tooltip
+                                if (Array.isArray(radii) && radii[idx] === 0) return '';
+                                // Deepseek（市值线）详细tooltip
+                                if (label === 'Deepseek' && price && typeof price === 'object') {
+                                    const lines = [];
+                                    lines.push(`Deepseek (归一化): ${val}`);
+                                    lines.push(`总价值 (RMB): ${price.total}`);
+                                    lines.push(`现金 (RMB): ${price.cash}`);
+                                    const stocks = price.stocks || {};
+                                    for (const code in stocks) {
+                                        if (stocks.hasOwnProperty(code)) {
+                                            const stock = stocks[code];
+                                            lines.push(
+                                                `  ${code}: 股数 ${stock.shares}, 价格 ${stock.price}, 市值 ${stock.value}`
+                                            );
+                                        }
+                                    }
+                                    if (typeof price.comment === 'string' && price.comment.trim() !== '') {
+                                        lines.push('备注: ' + price.comment);
+                                    }
+                                    return lines;
+                                }
+                                // 其他线：如有点评，优先展示点评，否则展示数值
+                                if (price && typeof price === 'object' && price.comment) {
+                                    return [`${label}: ${val}`, '点评: ' + price.comment];
+                                } else if (price !== undefined) {
+                                    const originalPrice = typeof price === 'object' ? price.value || price.total : price;
+                                    return `${label}: ${val} (原始价格: ${originalPrice})`;
+                                } else {
+                                    return `${label}: ${val}`;
+                                }
+                            },
+                            title: function(context) {
+                                // 只在有点评节点时显示title
+                                if (context && context.length > 0) {
+                                    const ds = context[0].dataset;
+                                    const idx = context[0].dataIndex;
+                                    const radii = ds.pointRadius || [];
+                                    if (Array.isArray(radii) && radii[idx] === 0) return '';
+                                }
+                                return context[0].label;
+                            }
+                        }
+                    }
+                },
+                scales: { x: { display: true }, y: { display: true } }
+            }
+        });
+
+        // 已移除自定义 Hover highlight 逻辑，彻底避免抖动
+    }
+    
+    fetchData().then(renderChart);
+</script>
+</body>
+</html>
