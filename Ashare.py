@@ -65,7 +65,7 @@ if __name__ == '__main__':
     df=get_price('sh000001',frequency='1d',count=10)      #支持'1d'日, '1w'周, '1M'月  
     print('上证指数日线行情\n',df)
     
-    df=get_price('000568',frequency='60m',count=10)  #支持'1m','5m','15m','30m','60m'
+    df=get_price('000688.XSHG',frequency='60m',count=10)  #支持'1m','5m','15m','30m','60m'
     print('上证指数分钟线\n',df)
 
 # Ashare 股票行情数据( https://github.com/mpquant/Ashare )

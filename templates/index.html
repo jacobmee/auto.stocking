@@ -37,19 +37,28 @@
     const VISIBLE_POINT_RADIUS = 6;
     const HOVER_POINT_RADIUS = 12;
     
-    // 注册 annotation 3.x 插件到 Chart.js 3.x
+    // ** 【修复 1：将 customStocks 定义为全局/顶层变量】 **
+    let customStocks = []; 
+
+    // 注册 annotation 插件
     if (window.Chart && window.ChartAnnotation) {
+        // 确保使用正确的注册方法
         Chart.register(window.ChartAnnotation);
     }
 
 
-    async function fetchData(baseDateStr, customStocks) {
+    async function fetchData(baseDateStr, codes) {
         // 支持传递基准日期参数和自定义股票
         let url = '/api/lines';
         let params = [];
         if (baseDateStr) params.push('base_date=' + encodeURIComponent(baseDateStr));
-        if (customStocks && customStocks.length) params.push('codes=' + encodeURIComponent(customStocks.join(',')));
+        // 使用传递进来的 codes 数组
+        if (codes && codes.length) params.push('codes=' + encodeURIComponent(codes.join(',')));
         if (params.length) url += '?' + params.join('&');
+        
+        // ** 【调试点】 ** 检查请求的 URL 是否正确
+        // console.log("Fetching URL:", url); 
+        
         const resp = await fetch(url);
         return await resp.json();
     }
@@ -59,11 +68,12 @@
      */
     function getCommentRadii(prices) {
         if (!prices || prices.length === 0) return [];
+        // 确保 comment 不为空或纯空格
         return prices.map((p) => (p && typeof p === 'object' && p.comment && p.comment.trim() !== '') ? VISIBLE_POINT_RADIUS : 0);
     }
 
 
-    // 使用 Lato 作为 Chart.js 的全局默认字体（3.x 只支持全局设置）
+    // 使用 Lato 作为 Chart.js 的全局默认字体
     if (window.Chart && Chart.defaults) {
         Chart.defaults.font.family = 'Lato, Arial, sans-serif';
     }
@@ -81,22 +91,19 @@
     }
 
     let chartInstance = window._chartInstance;
-    // 获取当前基准日期（yyyy-mm-dd），无则返回空串
+    
     function getCurrentBaseDate() {
         const input = document.getElementById('baseDateInput');
-        // 确保元素存在且有值
         return input && input.value ? input.value : '';
     }
 
     function renderChart(data) {
         const ctx = document.getElementById('lineChart').getContext('2d');
-        // 销毁旧实例，防止多次渲染叠加
         if (window._chartInstance) {
             window._chartInstance.destroy();
         }
-        // 格式化 x 轴标签
+        
         const formattedLabels = (data.labels || []).map(formatLabelTimestr);
-        // 线的名字和代码映射
         const meta = data.lineMeta || [
             {name: '沪深300', code: '000300.XSHG'},
             {name: '科创50', code: '000688.XSHG'},
@@ -112,17 +119,18 @@
         const baseDate = getCurrentBaseDate();
         let baseIdx = -1;
         
-        // ** 【关键检查点】 **
-        // 确保 baseDate 有值，且能在 labels 中找到对应日期
         if (baseDate && data.labels && data.labels.length) {
-            // 查找标签中日期部分与输入日期匹配的第一个索引
             baseIdx = data.labels.findIndex(lab => String(lab).slice(0,10) === baseDate);
         }
+        
+        // ** 【调试点】 ** 检查基准日期索引是否找到
+        // console.log("Base Date:", baseDate, "Found Index:", baseIdx); 
 
         // ==========================================================
-        // ** 修复逻辑：构造完整的 datasets 数组 **
+        // ** 构造 datasets 数组 **
         // ==========================================================
         let datasets = [
+            // 沪深300
             {
                 label: meta[0].name,
                 data: data.line1,
@@ -131,12 +139,14 @@
                 fill: false,
                 pointRadius: radii1,
                 pointHoverRadius: radii1.map(r => r > 0 ? HOVER_POINT_RADIUS : 0),
-                pointStyle: radii1.map(r => r > 0 ? 'circle' : 'circle'),
                 pointBackgroundColor: radii1.map(r => r > 0 ? 'white' : 'rgba(54,162,235,1)'),
                 pointHoverBackgroundColor: radii1.map(r => r > 0 ? 'rgba(54,162,235,1)' : 'rgba(54,162,235,1)'),
+                pointBorderColor: 'rgba(54,162,235,1)',
+                pointBorderWidth: 2,
                 customPrices: data.price1,
                 code: meta[0].code
             },
+            // 科创50
             {
                 label: meta[1].name,
                 data: data.line2,
@@ -145,12 +155,14 @@
                 fill: false,
                 pointRadius: radii2,
                 pointHoverRadius: radii2.map(r => r > 0 ? HOVER_POINT_RADIUS : 0),
-                pointStyle: radii2.map(r => r > 0 ? 'circle' : 'circle'),
                 pointBackgroundColor: radii2.map(r => r > 0 ? 'white' : 'rgba(75,192,192,1)'),
                 pointHoverBackgroundColor: radii2.map(r => r > 0 ? 'rgba(75,192,192,1)' : 'rgba(75,192,192,1)'),
+                pointBorderColor: 'rgba(75,192,192,1)',
+                pointBorderWidth: 2,
                 customPrices: data.price2,
                 code: meta[1].code
             },
+            // Deepseek
             {
                 label: meta[2].name,
                 data: data.line3,
@@ -159,7 +171,6 @@
                 fill: false,
                 pointRadius: radii3,
                 pointHoverRadius: radii3.map(r => r > 0 ? HOVER_POINT_RADIUS : 0),
-                pointStyle: radii3.map(r => r > 0 ? 'circle' : 'circle'),
                 pointBackgroundColor: radii3.map(r => r > 0 ? 'white' : 'rgba(255,99,132,1)'),
                 pointHoverBackgroundColor: radii3.map(r => r > 0 ? 'rgba(255,99,132,1)' : 'rgba(255,99,132,1)'),
                 pointBorderColor: 'rgba(255,99,132,1)',
@@ -181,7 +192,7 @@
             
             const customDatasets = data.customLines.map((line, index) => {
                 const customPrices = data.customPrices[index];
-                // 使用 customStocks 变量获取代码名称
+                // ** 【修复 3：使用全局 customStocks 变量获取代码】 **
                 const customCode = customStocks[index] || `自定义${index + 1}`; 
                 const customMeta = meta[3 + index] || { name: customCode, code: customCode };
                 
@@ -198,9 +209,10 @@
                     fill: false,
                     pointRadius: radii,
                     pointHoverRadius: radii.map(r => r > 0 ? HOVER_POINT_RADIUS : 0),
-                    pointStyle: radii.map(r => r > 0 ? 'circle' : 'circle'),
                     pointBackgroundColor: radii.map(r => r > 0 ? 'white' : borderColor),
                     pointHoverBackgroundColor: radii.map(r => r > 0 ? borderColor : borderColor),
+                    pointBorderColor: borderColor,
+                    pointBorderWidth: 2,
                     customPrices: customPrices,
                     code: customMeta.code
                 };
@@ -212,7 +224,6 @@
             type: 'line',
             data: {
                 labels: formattedLabels,
-                // ** 使用完整的 datasets 变量 **
                 datasets: datasets 
             },
             options: {
@@ -269,6 +280,10 @@
                                     return [`${label}: ${val.toFixed(2)} (原始价格: ${originalPrice.toFixed(2)})`, '点评: ' + price.comment];
                                 } else if (price !== undefined) {
                                     const originalPrice = typeof price === 'object' ? price.value || price.total : price;
+                                    // 检查 price 数组中是否存在 comment，以便统一处理非 Deepseek 线
+                                    if (typeof price === 'object' && price.comment && price.comment.trim() !== '') {
+                                        return [`${label}: ${val.toFixed(2)} (原始价格: ${originalPrice.toFixed(2)})`, '点评: ' + price.comment];
+                                    }
                                     return `${label}: ${val.toFixed(2)} (原始价格: ${originalPrice.toFixed(2)})`;
                                 } else {
                                     return `${label}: ${val.toFixed(2)}`;
@@ -286,8 +301,6 @@
                         }
                     },
                     annotation: {
-                        // ** 【修复 2：逻辑检查】 **
-                        // 只有当 baseIdx >= 0 (即找到匹配日期) 时，才会生成 annotations 对象
                         annotations: baseIdx >= 0 ? {
                                 baseLine: {
                                     type: 'line',
@@ -305,19 +318,17 @@
                                         font: { weight: 'bold' }
                                     }
                                 }
-                        } : {} // 如果未找到，返回空对象，不绘制
+                        } : {} 
                     }
                 },
-                scales: { x: { display: true }, y: { display: true } }
+                scales: { x: { display: true }, y: { beginAtZero: false } } // 允许Y轴不从0开始
             }
         });
 
-        // 保存实例，便于下次销毁
         window._chartInstance = chart;
     }
     
-    // ===== 自定义股票管理 =====
-    let customStocks = [];
+    // ===== 自定义股票管理 (逻辑微调) =====
     function renderCustomStockList() {
         const listDiv = document.getElementById('customStockList');
         listDiv.innerHTML = '';
@@ -330,11 +341,11 @@
             delBtn.title = '删除';
             delBtn.style.cssText = 'margin-left:2px;font-size:12px;color:#c00;background:none;border:none;cursor:pointer;';
             delBtn.onclick = function() {
-            customStocks.splice(idx,1);
-            renderCustomStockList();
-            triggerChartUpdate();
-            if (window.saveCustomCodes) window.saveCustomCodes();
-        };
+                customStocks.splice(idx,1);
+                renderCustomStockList();
+                triggerChartUpdate();
+                if (window.saveCustomCodes) window.saveCustomCodes(customStocks); // 传递当前列表
+            };
             span.appendChild(delBtn);
             listDiv.appendChild(span);
         });
@@ -344,30 +355,30 @@
         let code = input.value.trim();
         if (!code) return;
         if (customStocks.length >= 5) { alert('最多添加5个自定义股票'); return; }
-        // 自动补全后缀
+        
         let codeNorm = code;
+        // 自动补全后缀逻辑可以根据实际后端要求调整
         if (!/\.X[SA]HG$|\.KH$|\.XSHE$/i.test(code)) {
-            // 只输入数字时自动尝试主板、科创板
+             // 简单的 A 股后缀处理，这里可以保持原样或根据您的环境进行更复杂的推断
             if (/^\d{6}$/.test(code)) {
-                const trySuffix = ['.XSHG', '.XSHE', '.XHSG', '.KH'];
-                for (let suf of trySuffix) {
-                    if (!customStocks.includes(code + suf)) {
-                        codeNorm = code + suf;
-                        break;
-                    }
+                if (code.startsWith('60') || code.startsWith('00') || code.startsWith('30')) {
+                    // 假设主要在 A 股市场
+                    if (code.startsWith('60')) codeNorm = code + '.XSHG';
+                    else if (code.startsWith('00') || code.startsWith('30')) codeNorm = code + '.XSHE';
                 }
             }
         }
+        
         if (customStocks.includes(codeNorm)) { alert('已存在'); return; }
         customStocks.push(codeNorm);
         input.value = '';
         renderCustomStockList();
         triggerChartUpdate();
-        // 🚨 修复：添加成功后也需要保存到后端
-        if (window.saveCustomCodes) window.saveCustomCodes(); 
+        if (window.saveCustomCodes) window.saveCustomCodes(customStocks); 
     };
     function triggerChartUpdate() {
         const val = document.getElementById('baseDateInput').value;
+        // ** 传递 customStocks 变量 **
         fetchData(val, customStocks).then(renderChart);
     }
     // ===== 基准日期选择控件事件绑定 =====
@@ -375,9 +386,22 @@
         triggerChartUpdate();
     };
 
-    // 页面加载时自动用默认基准日期渲染
-    const defaultBaseDate = document.getElementById('baseDateInput').value;
-    fetchData(defaultBaseDate, customStocks).then(renderChart);
+    // ** 【修复 4：初始化逻辑】 **
+    // 页面加载时执行的初始化函数
+    function initializeChart() {
+        // 尝试从本地加载自定义代码 (假设 custom_code_loader.js 定义了 loadCustomCodes)
+        if (window.loadCustomCodes) {
+            customStocks = window.loadCustomCodes() || [];
+        }
+        renderCustomStockList();
+        
+        const defaultBaseDate = document.getElementById('baseDateInput').value;
+        // 使用加载的自定义股票代码进行首次渲染
+        fetchData(defaultBaseDate, customStocks).then(renderChart);
+    }
+
+    // 监听 DOMContentLoaded 或直接调用 (因为脚本在 body 底部)
+    initializeChart();
 </script>
 </body>
 </html>

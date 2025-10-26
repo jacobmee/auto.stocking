@@ -49,7 +49,7 @@ def api_lines():
     codes_str = request.args.get('codes', '')
     input_codes = [c.strip() for c in codes_str.split(',') if c.strip()] if codes_str else []
     # 自动补全后缀并轮询
-    suffixes = ['.XSHG', '.XSHE', '.XHSG', '.HK']
+    suffixes = ['.XSHG', '.XSHE', '.XHSG']
     checked_codes = []
     code_map = {}  # 原始输入 -> 实际有行情的代码
     for code in input_codes:
