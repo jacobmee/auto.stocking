@@ -12,9 +12,46 @@
         }
         body { margin: 40px; }
         #chart-container { width: 90vw; max-width: 1200px; margin: auto; }
+
+        /* 自定义 Tooltip 样式，使其看起来像 Chart.js 默认样式 */
+        /* ** 核心：极高 Z-INDEX，且在 BODY 根部渲染，解决遮挡问题 ** */
+        #chartjs-tooltip {
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 6px;
+            color: #fff;
+            padding: 8px 12px;
+            font-size: 12px;
+            line-height: 1.4;
+            transition: all 0.1s ease;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            z-index: 2147483647; 
+            pointer-events: none; 
+            position: absolute; 
+            opacity: 0; 
+            /* 确保 Tooltip 的最大宽度，防止在屏幕边缘过宽 */
+            max-width: 400px; 
+            white-space: normal; /* 允许换行 */
+        }
+        #chartjs-tooltip div.tooltip-title {
+            font-weight: bold;
+            padding-bottom: 4px;
+            margin-bottom: 4px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        #chartjs-tooltip div.tooltip-body {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        /* 确保 Tooltip 内部的行也使用 Lato 字体 */
+        #chartjs-tooltip * {
+            font-family: 'Lato', Arial, sans-serif !important;
+        }
     </style>
 </head>
 <body>
+    <div id="chartjs-tooltip"></div>
+
     <div id="baseDateDiv" style="position:absolute;top:24px;right:5vw;z-index:10;background:rgba(255,255,255,0.85);padding:4px 10px 10px 10px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,0.04);font-family:'Lato',Arial,sans-serif;font-size:12px;min-width:220px;">
         <label style="font-family:'Lato',Arial,sans-serif;font-size:12px;">开赛日期: <input type="date" id="baseDateInput" value="2025-10-24" style="font-family:'Lato',Arial,sans-serif;font-size:12px;"> </label>
         <button id="baseDateBtn" style="font-family:'Lato',Arial,sans-serif;font-size:12px;">应用</button>
@@ -36,88 +73,57 @@
     // 定义增大后的点半径
     const VISIBLE_POINT_RADIUS = 6;
     const HOVER_POINT_RADIUS = 12;
-    
-    // 将 customStocks 定义为全局/顶层变量
     let customStocks = []; 
 
-    // 注册 annotation 插件
     if (window.Chart && window.ChartAnnotation) {
         Chart.register(window.ChartAnnotation);
     }
 
     /**
-     * 通用的 borderDash 函数，用于根据全局基准索引 (window._chartBaseIdx) 绘制虚线。
-     * baseIdx 现在代表【线段开始变为实线】的那个点的索引。
+     * 通用的 borderDash 函数
      */
     function getDynamicBorderDash(ctx) {
-        // ctx.p0DataIndex 是当前段起点索引，ctx.p1DataIndex 是终点索引
-        const baseIdx = window._chartBaseIdx; // 这个值现在是 lineStartIdx
+        const baseIdx = window._chartBaseIdx;
         if (typeof baseIdx !== 'number' || baseIdx < 0) return [];
-        
-        // 逻辑：如果线段的终点索引严格小于 baseIdx，则使用虚线 [6, 6]
         if (ctx.p1DataIndex < baseIdx) {
             return [6, 6]; 
         }
-        return []; // 实线
+        return [];
     }
-    
-    // 将动态虚线逻辑封装到一个可重用的 segment 对象中
-    const DYNAMIC_DASH_SEGMENT = {
-        borderDash: getDynamicBorderDash
-    };
-
+    const DYNAMIC_DASH_SEGMENT = { borderDash: getDynamicBorderDash };
 
     async function fetchData(baseDateStr, codes) {
-        // 支持传递基准日期参数和自定义股票
         let url = '/api/lines';
         let params = [];
         if (baseDateStr) params.push('base_date=' + encodeURIComponent(baseDateStr));
-        // 使用传递进来的 codes 数组
         if (codes && codes.length) params.push('codes=' + encodeURIComponent(codes.join(',')));
         if (params.length) url += '?' + params.join('&');
-        
         const resp = await fetch(url);
         return await resp.json();
     }
 
     /**
      * 根据 priceX 数据计算每个点的半径。
-     * * @param {Array} prices - 价格/组合数据数组
-     * @param {string} code - 股票代码，用于区分 Deepseek
      */
     function getCommentRadii(prices, code) {
         if (!prices || prices.length === 0) return [];
-        
         return prices.map((p) => {
             if (!p || typeof p !== 'object') return 0;
-
-            // 1. 通用规则：检查顶级 comment
-            if (p.comment && p.comment.trim() !== '') {
-                return VISIBLE_POINT_RADIUS;
-            }
-
-            // 2. Deepseek 特殊规则：检查 portfolio_analysis 或 stock_operations
+            if (p.comment && p.comment.trim() !== '') return VISIBLE_POINT_RADIUS;
             if (code === 'Deepseek') {
                 const hasAnalysis = p.portfolio_analysis && Object.keys(p.portfolio_analysis).length > 0;
                 const hasOperations = Array.isArray(p.stock_operations) && p.stock_operations.length > 0;
-                
-                if (hasAnalysis || hasOperations) {
-                    return VISIBLE_POINT_RADIUS;
-                }
+                if (hasAnalysis || hasOperations) return VISIBLE_POINT_RADIUS;
             }
-
-            return 0; // 否则，点半径为 0
+            return 0;
         });
     }
 
-
-    // 使用 Lato 作为 Chart.js 的全局默认字体
     if (window.Chart && Chart.defaults) {
         Chart.defaults.font.family = 'Lato, Arial, sans-serif';
     }
 
     function formatLabelTimestr(s) {
-        // 输入类似 '2025-09-26 10:30:00'，输出 'Sep 26 10:30' 形式
         const d = new Date(s);
         if (isNaN(d.getTime())) return s;
         const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -131,27 +137,211 @@
     /**
      * 自定义文本换行函数 (适用于中文，按字符数强制换行)
      * @param {string} text - 需要换行的文本
-     * @param {number} maxChars - 每行最大字符数，默认设置为 15，以适应较窄的 tooltip
+     * @param {number} maxChars - 每行最大字符数，Deepseek默认15，其他30
      * @returns {string[]} - 包含换行符的字符串数组
      */
     function wordWrap(text, maxChars = 15) {
-        if (!text || text.length === 0) {
-            return [''];
-        }
-        
+        if (!text || text.length === 0) return [''];
         const lines = [];
         let startIndex = 0;
-        
         while (startIndex < text.length) {
-            // 从 startIndex 开始截取 maxChars 长度的子串
             let endIndex = Math.min(startIndex + maxChars, text.length);
             let line = text.substring(startIndex, endIndex);
             lines.push(line);
             startIndex = endIndex;
         }
-
         return lines;
     }
+
+
+    // ==========================================================
+    // ** 核心函数：外部 Tooltip 渲染和定位 (包含底部溢出修复) **
+    // ==========================================================
+    const externalTooltipHandler = (context) => {
+        const { chart, tooltip } = context;
+        let tooltipEl = document.getElementById('chartjs-tooltip');
+
+        // 隐藏 Tooltip
+        if (tooltip.opacity === 0) {
+            tooltipEl.style.opacity = 0;
+            return;
+        }
+
+        // 1. 生成内容 (完全复制和修改原有的 callbacks.label 逻辑)
+        let innerHtml = '';
+        if (tooltip.dataPoints.length) {
+            
+            // --- 检查和过滤逻辑 ---
+            const titleContext = tooltip.dataPoints;
+            const ds = titleContext[0].dataset;
+            const idx = titleContext[0].dataIndex;
+            const radii = ds.pointRadius || [];
+            
+            // 只有标记点（半径 > 0）时才显示 Tooltip
+            if (Array.isArray(radii) && radii[idx] === 0) {
+                tooltipEl.style.opacity = 0;
+                return;
+            }
+            
+            // --- Tooltip 标题逻辑 ---
+            innerHtml += `<div class="tooltip-title">${titleContext[0].label}</div>`; 
+
+            // --- Tooltip 内容逻辑 ---
+            let bodyLines = [];
+
+            tooltip.dataPoints.forEach((context) => {
+                const ds = context.dataset;
+                const idx = context.dataIndex;
+                const label = ds.label || '';
+                const val = context.parsed.y;
+                const price = ds.customPrices ? ds.customPrices[idx] : undefined;
+                const radii = ds.pointRadius || [];
+                
+                if (Array.isArray(radii) && radii[idx] === 0) return;
+                
+                let lines = [];
+                
+                if (label === 'Deepseek' && price && typeof price === 'object') {
+                    // Deepseek 复杂逻辑... (保持上一次的完整内容生成逻辑)
+                    lines.push(`Deepseek (归一化): ${val.toFixed(2)}`);
+                    lines.push(`总价值 (RMB): ${price.total ? price.total.toFixed(2) : 'N/A'}`);
+                    lines.push(`现金 (RMB): ${price.cash ? price.cash.toFixed(2) : 'N/A'}`);
+                    const stocks = price.stocks || {};
+                    for (const code in stocks) {
+                        if (stocks.hasOwnProperty(code)) {
+                            const stock = stocks[code];
+                            lines.push(
+                                `  ${code}: 股数 ${stock.shares}, 价格 ${stock.price ? stock.price.toFixed(2) : 'N/A'}, 市值 ${stock.value ? stock.value.toFixed(2) : 'N/A'}`
+                            );
+                        }
+                    }
+                    
+                    if (price.portfolio_analysis) {
+                        const pa = price.portfolio_analysis;
+                        lines.push('【组合分析】');
+                        if (pa.date) lines.push(`时间: ${pa.date}`);
+                        
+                        if (pa.market_summary) {
+                            lines.push('市场综述:');
+                            const wrappedSummary = wordWrap(pa.market_summary, 15).map(line => ' &nbsp; &nbsp; ' + line); 
+                            lines.push(...wrappedSummary);
+                        }
+                        if (pa.risk_level) lines.push(`风险等级: ${pa.risk_level}`);
+                        if (pa.overall_operation) lines.push(`操作建议: ${pa.overall_operation}`);
+                        if (pa.trading_plan) {
+                            lines.push('交易计划:');
+                            const wrappedPlan = wordWrap(pa.trading_plan, 15).map(line => ' &nbsp; &nbsp; ' + line);
+                            lines.push(...wrappedPlan);
+                        }
+                        if (pa.portfolio_comment) {
+                            lines.push('点评:');
+                            const wrappedComment = wordWrap(pa.portfolio_comment, 15).map(line => ' &nbsp; &nbsp; ' + line);
+                            lines.push(...wrappedComment);
+                        }
+                    }
+                    
+                    if (Array.isArray(price.stock_operations) && price.stock_operations.length > 0) {
+                        lines.push('【操作记录】');
+                        price.stock_operations.forEach(op => {
+                            const amount = op.amount !== undefined ? op.amount : 'N/A';
+                            const priceVal = op.price !== undefined ? op.price : 'N/A';
+                            const comment = op.comment !== undefined ? op.comment : '';
+                            lines.push(`${op.date.substring(5, 16)} ${op.code} ${op.type} 数量:${amount} 价格:${priceVal} 备注:${comment}`);
+                        });
+                    }
+                    
+                    if (typeof price.comment === 'string' && price.comment.trim() !== '') {
+                        lines.push('备注:');
+                        const wrappedGeneralComment = wordWrap(price.comment, 15).map(line => ' &nbsp; &nbsp; ' + line);
+                        lines.push(...wrappedGeneralComment);
+                    }
+                    
+                    bodyLines.push(...lines); 
+                }
+                
+                else if (price && typeof price === 'object' && price.comment && price.comment.trim() !== '') {
+                    const originalPrice = typeof price === 'object' ? price.value || price.total : price;
+                    const wrappedComment = wordWrap(price.comment, 30).map(line => ' &nbsp; ' + line); 
+                    bodyLines.push(`${label}: ${val.toFixed(2)} (原始价格: ${originalPrice.toFixed(2)})`);
+                    bodyLines.push('点评:');
+                    bodyLines.push(...wrappedComment);
+                } else if (price !== undefined) {
+                    const originalPrice = typeof price === 'object' ? price.value || price.total : price;
+                    bodyLines.push(`${label}: ${val.toFixed(2)} (原始价格: ${originalPrice.toFixed(2)})`);
+                } else {
+                    bodyLines.push(`${label}: ${val.toFixed(2)}`);
+                }
+            });
+
+            innerHtml += '<div class="tooltip-body">' + bodyLines.map(line => `<div>${line}</div>`).join('') + '</div>';
+
+            // 2. 注入 HTML
+            tooltipEl.innerHTML = innerHtml;
+            // 必须在设置 opacity=1 之前获取尺寸，否则尺寸可能不准确
+            tooltipEl.style.opacity = 1; 
+            
+            // 3. ** 核心修复：使用 getBoundingClientRect 获取 Canvas 绝对位置 **
+            const canvasRect = chart.canvas.getBoundingClientRect();
+            
+            // Tooltip 的原始定位点（相对于 Canvas 左上角）
+            const caretX = tooltip.caretX; 
+            const caretY = tooltip.caretY; 
+
+            // Tooltip 元素的尺寸 (渲染后才能获取)
+            const tooltipWidth = tooltipEl.offsetWidth;
+            const tooltipHeight = tooltipEl.offsetHeight;
+
+            // 初始计算 Tooltip 的绝对位置 (相对于 Viewport)
+            let finalX = canvasRect.left + caretX;
+            let finalY = canvasRect.top + caretY - tooltipHeight - 10; // ** 默认：定位在点上方 10px 处 **
+
+            // 4. ** 边界检查和修正（防止溢出屏幕） **
+            
+            const viewportPadding = 10; // 留出 10px 边距
+            const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight; // 视口高度
+
+            // 检查 Y 轴：防止溢出顶部
+            if (finalY < viewportPadding) {
+                // 如果溢出顶部，则将 Tooltip 定位到点下方
+                finalY = canvasRect.top + caretY + 10; // 定位在点下方 10px 处
+            }
+
+            // ** 检查 Y 轴：防止溢出底部 (这是新增加的修复) **
+            // 检查 Tooltip 的底边是否在屏幕内
+            if (finalY + tooltipHeight > viewportHeight - viewportPadding) {
+                // 如果溢出底部，强制 Tooltip 贴紧屏幕底部安全边距
+                finalY = viewportHeight - tooltipHeight - viewportPadding;
+                // 注意：如果 Tooltip 太大，以至于即使贴着底部也溢出顶部，我们宁愿让它溢出顶部
+                // (因为前面已经做了顶部检查，但这次是强制调整到底部)
+                // 另一种策略是，如果底部溢出，强制放在数据点上方，但因为初始就在上方，所以这次是修正强制贴底
+                
+                // 确保至少不低于 Canvas 顶部 (如果 Tooltip 巨大，防止它跑到 Canvas 上方太远)
+                if (finalY < canvasRect.top + viewportPadding) {
+                    finalY = canvasRect.top + viewportPadding; 
+                }
+            }
+
+
+            // 修正 X 轴：使其中心点对准数据点，并防止溢出左/右边界
+            finalX = finalX - (tooltipWidth / 2);
+
+            // 如果溢出左侧 (Viewport 左侧 < 0)
+            if (finalX < viewportPadding) {
+                finalX = viewportPadding; // 强制定位到左侧安全边距
+            }
+            
+            // 如果溢出右侧
+            if (finalX + tooltipWidth > viewportWidth - viewportPadding) {
+                finalX = viewportWidth - tooltipWidth - viewportPadding; // 强制定位到右侧安全边距
+            }
+            
+            // 5. 设置最终 CSS 位置 (使用绝对位置，即相对于 Body/Viewport)
+            tooltipEl.style.left = finalX + 'px';
+            tooltipEl.style.top = finalY + 'px';
+        }
+    };
+    // ==========================================================
 
 
     let chartInstance = window._chartInstance;
@@ -174,291 +364,65 @@
             {name: 'Deepseek', code: 'Deepseek'}
         ];
         
-        // ** 核心修正：传递 code 参数给 getCommentRadii **
         const radii1 = getCommentRadii(data.price1, meta[0].code);
         const radii2 = getCommentRadii(data.price2, meta[1].code);
-        const radii3 = getCommentRadii(data.price3, meta[2].code); // Deepseek
+        const radii3 = getCommentRadii(data.price3, meta[2].code); 
 
-        // ==========================================================
-        // ** 核心修正：分离线条索引和垂直基准线索引 **
-        // ==========================================================
         const baseDate = getCurrentBaseDate(); 
-        
-        // 垂直基准线的索引：用于 Annotation
         let baseLineIdx = -1;
-        // 虚实线切换的索引：用于 segment.borderDash 逻辑
         let lineStartIdx = -1; 
-
         if (baseDate && data.labels && data.labels.length) {
-            // 查找第一个日期部分与 baseDate 匹配的索引
             const firstMatchIndex = data.labels.findIndex(lab => String(lab).slice(0,10) === baseDate);
-            
             if (firstMatchIndex !== -1) {
-                // 1. 垂直基准线：画在找到的第一个点（例如 9:30 的刻度）
                 baseLineIdx = firstMatchIndex;
-                
-                // 2. 线条虚实切换：必须在找到的点【之后】开始实线，所以索引要 +1
                 lineStartIdx = firstMatchIndex + 1;
             }
         }
-        
-        // ** 将用于线条逻辑的索引赋给全局变量 **
         window._chartBaseIdx = lineStartIdx;
         
-        // ==========================================================
-        // ** 构造 datasets 数组 (保持不变) **
-        // ==========================================================
         let datasets = [
-            // 沪深300
-            {
-                label: meta[0].name,
-                data: data.line1,
-                borderColor: 'rgba(54,162,235,1)',
-                backgroundColor: 'rgba(54,162,235,0.1)',
-                fill: false,
-                pointRadius: radii1,
-                pointHoverRadius: radii1.map(r => r > 0 ? HOVER_POINT_RADIUS : 0),
-                pointBackgroundColor: radii1.map(r => r > 0 ? 'white' : 'rgba(54,162,235,1)'),
-                pointHoverBackgroundColor: radii1.map(r => r > 0 ? 'rgba(54,162,235,1)' : 'rgba(54,162,235,1)'),
-                pointBorderColor: 'rgba(54,162,235,1)',
-                pointBorderWidth: 2,
-                customPrices: data.price1,
-                code: meta[0].code,
-                segment: DYNAMIC_DASH_SEGMENT
-            },
-            // 科创50
-            {
-                label: meta[1].name,
-                data: data.line2,
-                borderColor: 'rgba(75,192,192,1)',
-                backgroundColor: 'rgba(75,192,192,0.1)',
-                fill: false,
-                pointRadius: radii2,
-                pointHoverRadius: radii2.map(r => r > 0 ? HOVER_POINT_RADIUS : 0),
-                pointBackgroundColor: radii2.map(r => r > 0 ? 'white' : 'rgba(75,192,192,1)'),
-                pointHoverBackgroundColor: radii2.map(r => r > 0 ? 'rgba(75,192,192,1)' : 'rgba(75,192,192,1)'),
-                pointBorderColor: 'rgba(75,192,192,1)',
-                pointBorderWidth: 2,
-                customPrices: data.price2,
-                code: meta[1].code,
-                segment: DYNAMIC_DASH_SEGMENT
-            },
-            // Deepseek (红线)
-            {
-                label: meta[2].name,
-                data: data.line3,
-                borderColor: 'rgba(255,99,132,1)',
-                backgroundColor: 'rgba(255,99,132,0.1)',
-                fill: false,
-                pointRadius: radii3, // 使用了修正后的 radii3
-                pointHoverRadius: radii3.map(r => r > 0 ? HOVER_POINT_RADIUS : 0),
-                pointBackgroundColor: radii3.map(r => r > 0 ? 'white' : 'rgba(255,99,132,1)'),
-                pointHoverBackgroundColor: radii3.map(r => r > 0 ? 'rgba(255,99,132,1)' : 'rgba(255,99,132,1)'),
-                pointBorderColor: 'rgba(255,99,132,1)',
-                pointBorderWidth: 2,
-                customPrices: data.price3,
-                code: meta[2].code,
-                segment: DYNAMIC_DASH_SEGMENT
-            }
+            { label: meta[0].name, data: data.line1, borderColor: 'rgba(54,162,235,1)', backgroundColor: 'rgba(54,162,235,0.1)', fill: false, pointRadius: radii1, pointHoverRadius: radii1.map(r => r > 0 ? HOVER_POINT_RADIUS : 0), pointBackgroundColor: radii1.map(r => r > 0 ? 'white' : 'rgba(54,162,235,1)'), pointHoverBackgroundColor: radii1.map(r => r > 0 ? 'rgba(54,162,235,1)' : 'rgba(54,162,235,1)'), pointBorderColor: 'rgba(54,162,235,1)', pointBorderWidth: 2, customPrices: data.price1, code: meta[0].code, segment: DYNAMIC_DASH_SEGMENT },
+            { label: meta[1].name, data: data.line2, borderColor: 'rgba(75,192,192,1)', backgroundColor: 'rgba(75,192,192,0.1)', fill: false, pointRadius: radii2, pointHoverRadius: radii2.map(r => r > 0 ? HOVER_POINT_RADIUS : 0), pointBackgroundColor: radii2.map(r => r > 0 ? 'white' : 'rgba(75,192,192,1)'), pointHoverBackgroundColor: radii2.map(r => r > 0 ? 'rgba(75,192,192,1)' : 'rgba(75,192,192,1)'), pointBorderColor: 'rgba(75,192,192,1)', pointBorderWidth: 2, customPrices: data.price2, code: meta[1].code, segment: DYNAMIC_DASH_SEGMENT },
+            { label: meta[2].name, data: data.line3, borderColor: 'rgba(255,99,132,1)', backgroundColor: 'rgba(255,99,132,0.1)', fill: false, pointRadius: radii3, pointHoverRadius: radii3.map(r => r > 0 ? HOVER_POINT_RADIUS : 0), pointBackgroundColor: radii3.map(r => r > 0 ? 'white' : 'rgba(255,99,132,1)'), pointHoverBackgroundColor: radii3.map(r => r > 0 ? 'rgba(255,99,132,1)' : 'rgba(255,99,132,1)'), pointBorderColor: 'rgba(255,99,132,1)', pointBorderWidth: 2, customPrices: data.price3, code: meta[2].code, segment: DYNAMIC_DASH_SEGMENT }
         ];
 
-        // 动态添加自定义股票数据 (保持不变)
         if (data.customLines && Array.isArray(data.customLines) && data.customPrices && Array.isArray(data.customPrices)) {
-            const colors = [
-                'rgba(255,159,64,1)',  // 橙色
-                'rgba(153,102,255,1)', // 紫色
-                'rgba(255,205,86,1)',  // 黄色
-                'rgba(201,203,207,1)', // 灰色
-                'rgba(0,128,128,1)'    // 青色
-            ];
-            
-            const customDatasets = data.customLines.map((line, index) => {
-                const customPrices = data.customPrices[index];
+            const colors = ['rgba(255,159,64,1)', 'rgba(153,102,255,1)', 'rgba(255,205,86,1)', 'rgba(201,203,207,1)', 'rgba(0,128,128,1)'];
+            datasets = datasets.concat(data.customLines.map((line, index) => {
                 const customCode = customStocks[index] || `自定义${index + 1}`; 
-                const customMeta = meta[3 + index] || { name: customCode, code: customCode };
-                
-                // ** 核心修正：传递 code 参数给 getCommentRadii **
-                const radii = getCommentRadii(customPrices, customCode);
+                const radii = getCommentRadii(data.customPrices[index], customCode);
                 const colorIndex = index % colors.length; 
                 const borderColor = colors[colorIndex];
-                const backgroundColor = borderColor.replace('1)', '0.1)'); 
-
+                
                 return {
-                    label: customMeta.name,
-                    data: line,
-                    borderColor: borderColor,
-                    backgroundColor: backgroundColor,
-                    fill: false,
-                    pointRadius: radii,
-                    pointHoverRadius: radii.map(r => r > 0 ? HOVER_POINT_RADIUS : 0),
-                    pointBackgroundColor: radii.map(r => r > 0 ? 'white' : borderColor),
-                    pointHoverBackgroundColor: radii.map(r => r > 0 ? borderColor : borderColor),
-                    pointBorderColor: borderColor,
-                    pointBorderWidth: 2,
-                    customPrices: customPrices,
-                    code: customMeta.code,
-                    segment: DYNAMIC_DASH_SEGMENT
+                    label: customCode, data: line, borderColor: borderColor, backgroundColor: borderColor.replace('1)', '0.1)'), fill: false, 
+                    pointRadius: radii, pointHoverRadius: radii.map(r => r > 0 ? HOVER_POINT_RADIUS : 0), 
+                    pointBackgroundColor: radii.map(r => r > 0 ? 'white' : borderColor), pointHoverBackgroundColor: radii.map(r => r > 0 ? borderColor : borderColor), 
+                    pointBorderColor: borderColor, pointBorderWidth: 2, customPrices: data.customPrices[index], code: customCode, segment: DYNAMIC_DASH_SEGMENT
                 };
-            });
-            datasets = datasets.concat(customDatasets);
+            }));
         }
 
         const chart = new Chart(ctx, {
             type: 'line',
-            data: {
-                labels: formattedLabels,
-                datasets: datasets 
-            },
+            data: { labels: formattedLabels, datasets: datasets },
             options: {
                 responsive: true,
-                interaction: {
-                    mode: 'nearest',
-                    intersect: true
-                },
-                hover: {
-                    mode: 'nearest',
-                    intersect: true,
-                    animationDuration: 0
-                },
+                interaction: { mode: 'nearest', intersect: true },
+                hover: { mode: 'nearest', intersect: true, animationDuration: 0 },
                 plugins: {
                     legend: { position: 'top', labels: { font: { size: 16 } } },
                     tooltip: {
+                        enabled: false, 
+                        external: externalTooltipHandler,
                         mode: 'nearest',
                         intersect: true,
-                        padding: {
-                            top: 10,    // 增加顶部填充
-                            right: 8,   // 减少右侧填充，以减少宽度
-                            bottom: 10, // 增加底部填充
-                            left: 8     // 减少左侧填充，以减少宽度
-                        },
-                        bodySpacing: 4, // 增加行间距，以增加高度
-                        callbacks: {
-                            label: function(context) {
-                                const ds = context.dataset;
-                                const idx = context.dataIndex;
-                                const label = ds.label || '';
-                                const val = context.parsed.y;
-                                const price = ds.customPrices ? ds.customPrices[idx] : undefined;
-                                const radii = ds.pointRadius || [];
-                                
-                                // 根据 Deepseek 逻辑修改的 getCommentRadii 结果进行过滤
-                                if (Array.isArray(radii) && radii[idx] === 0) return '';
-                                
-                                // Deepseek（市值线）详细tooltip
-                                if (label === 'Deepseek' && price && typeof price === 'object') {
-                                    let lines = [];
-                                    lines.push(`Deepseek (归一化): ${val.toFixed(2)}`);
-                                    lines.push(`总价值 (RMB): ${price.total ? price.total.toFixed(2) : 'N/A'}`);
-                                    lines.push(`现金 (RMB): ${price.cash ? price.cash.toFixed(2) : 'N/A'}`);
-                                    const stocks = price.stocks || {};
-                                    for (const code in stocks) {
-                                        if (stocks.hasOwnProperty(code)) {
-                                            const stock = stocks[code];
-                                            lines.push(
-                                                `  ${code}: 股数 ${stock.shares}, 价格 ${stock.price ? stock.price.toFixed(2) : 'N/A'}, 市值 ${stock.value ? stock.value.toFixed(2) : 'N/A'}`
-                                            );
-                                        }
-                                    }
-                                    
-                                    // 显示 portfolio_analysis
-                                    if (price.portfolio_analysis) {
-                                        const pa = price.portfolio_analysis;
-                                        lines.push('【组合分析】');
-                                        if (pa.date) lines.push(`时间: ${pa.date}`);
-                                        
-                                        // === 核心修正：应用新的 wordWrap 函数，并为每行添加前缀（默认为 15 个字符换行）===
-                                        if (pa.market_summary) {
-                                            lines.push('市场综述:');
-                                            // 使用 3 个空格作为缩进，让换行的内容与标题区分开
-                                            const wrappedSummary = wordWrap(pa.market_summary, 15).map(line => '   ' + line); 
-                                            lines.push(...wrappedSummary);
-                                        }
-                                        if (pa.risk_level) lines.push(`风险等级: ${pa.risk_level}`);
-                                        if (pa.overall_operation) lines.push(`操作建议: ${pa.overall_operation}`);
-                                        if (pa.trading_plan) {
-                                            lines.push('交易计划:');
-                                            // 使用 3 个空格作为缩进
-                                            const wrappedPlan = wordWrap(pa.trading_plan, 15).map(line => '   ' + line);
-                                            lines.push(...wrappedPlan);
-                                        }
-                                        // 组合点评如果很长，也进行换行处理
-                                        if (pa.portfolio_comment) {
-                                            lines.push('点评:');
-                                            const wrappedComment = wordWrap(pa.portfolio_comment, 15).map(line => '   ' + line);
-                                            lines.push(...wrappedComment);
-                                        }
-                                        // ======================================
-                                    }
-                                    
-                                    // 显示 stock_operations
-                                    if (Array.isArray(price.stock_operations) && price.stock_operations.length > 0) {
-                                        lines.push('【操作记录】');
-                                        price.stock_operations.forEach(op => {
-                                            // 确保字段存在
-                                            const amount = op.amount !== undefined ? op.amount : 'N/A';
-                                            const priceVal = op.price !== undefined ? op.price : 'N/A';
-                                            const comment = op.comment !== undefined ? op.comment : '';
-                                            // 简化日期显示，保持操作记录单行显示
-                                            lines.push(`${op.date.substring(5, 16)} ${op.code} ${op.type} 数量:${amount} 价格:${priceVal} 备注:${comment}`);
-                                        });
-                                    }
-                                    
-                                    // 最终显示 Deepseek 的 general comment
-                                    if (typeof price.comment === 'string' && price.comment.trim() !== '') {
-                                        lines.push('备注:');
-                                        const wrappedGeneralComment = wordWrap(price.comment, 15).map(line => '   ' + line);
-                                        lines.push(...wrappedGeneralComment);
-                                    }
-                                    
-                                    return lines; 
-                                }
-                                
-                                // 其他线：如有点评，优先展示点评，否则展示数值
-                                if (price && typeof price === 'object' && price.comment && price.comment.trim() !== '') {
-                                    // 仅有点评时，返回两行：归一化值(原始值) + 点评
-                                    const originalPrice = typeof price === 'object' ? price.value || price.total : price;
-                                    // 对通用点评也进行换行处理
-                                    const wrappedComment = wordWrap(price.comment, 30).map(line => '   ' + line); // 默认非 Deepseek 的点评给更多字符
-                                    return [`${label}: ${val.toFixed(2)} (原始价格: ${originalPrice.toFixed(2)})`, '点评: '].concat(wrappedComment);
-                                } else if (price !== undefined) {
-                                    // 仅有值，没有点评时，返回一行：归一化值(原始值)
-                                    const originalPrice = typeof price === 'object' ? price.value || price.total : price;
-                                    return `${label}: ${val.toFixed(2)} (原始价格: ${originalPrice.toFixed(2)})`;
-                                } else {
-                                    // 既不是Deepseek线，也没有自定义价格数据，只返回归一化值
-                                    return `${label}: ${val.toFixed(2)}`;
-                                }
-                            },
-                            title: function(context) {
-                                if (context && context.length > 0) {
-                                    const ds = context[0].dataset;
-                                    const idx = context[0].dataIndex;
-                                    const radii = ds.pointRadius || [];
-                                    // 仅当点半径大于0时才显示标题
-                                    if (Array.isArray(radii) && radii[idx] === 0) return '';
-                                }
-                                return context[0].label;
-                            }
-                        }
                     },
                     annotation: {
-                        // ** 核心修正：使用 baseLineIdx 控制垂直线位置 **
                         annotations: baseLineIdx >= 0 ? {
                                 baseLine: {
-                                    type: 'line',
-                                    xMin: baseLineIdx, // 使用正确的垂直线索引
-                                    xMax: baseLineIdx, // 使用正确的垂直线索引
-                                    borderColor: 'rgba(255, 140, 0, 0.3)',
-                                    borderWidth: 4,
-                                    borderDash: [6, 6],
-                                    label: {
-                                        display: true,
-                                        content: '基准',
-                                        position: 'start',
-                                        backgroundColor: 'rgba(255, 140, 0, 0.85)',
-                                        color: 'white',
-                                        font: { weight: 'bold' }
-                                    }
+                                    type: 'line', xMin: baseLineIdx, xMax: baseLineIdx, borderColor: 'rgba(255, 140, 0, 0.3)', borderWidth: 4, borderDash: [6, 6],
+                                    label: { display: true, content: '基准', position: 'start', backgroundColor: 'rgba(255, 140, 0, 0.85)', color: 'white', font: { weight: 'bold' } }
                                 }
                         } : {} 
                     }
@@ -470,7 +434,7 @@
         window._chartInstance = chart;
     }
     
-    // ===== 自定义股票管理 (保持不变) =====
+    // [其余的股票管理和初始化逻辑保持不变]
     function renderCustomStockList() {
         const listDiv = document.getElementById('customStockList');
         listDiv.innerHTML = '';
@@ -515,15 +479,13 @@
     };
     function triggerChartUpdate() {
         const val = document.getElementById('baseDateInput').value;
-        // 传递 customStocks 变量
         fetchData(val, customStocks).then(renderChart);
     }
-    // ===== 基准日期选择控件事件绑定 (保持不变) =====
+    
     document.getElementById('baseDateBtn').onclick = function() {
         triggerChartUpdate();
     };
 
-    // ** 【初始化逻辑】 (保持不变) **
     function initializeChart() {
         if (window.loadCustomCodes) {
             customStocks = window.loadCustomCodes() || [];
