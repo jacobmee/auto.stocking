@@ -1,50 +1,13 @@
-[
-  {
-    "date": "2025-09-26 10:30:00",
-    "type": "BUY",
-    "code": "000300.XSHG",
-    "amount": 11,
-    "price": 4576.86,
-    "comment": "首次大额买入000300.XSHG"
-  },
-  {
-    "date": "2025-09-26 10:30:00",
-    "type": "BUY",
-    "code": "000688.XSHG",
-    "amount": 30,
-    "price": 1484.62,
-    "comment": "首次大额买入000688.XSHG"
-  },
-  {
-    "date": "2025-10-16 14:00:00",
-    "type": "SELL",
-    "code": "000300.XSHG",
-    "amount": 4,
-    "price": 4622.13,
-    "comment": "高位卖出000300.XSHG"
-  },
-  {
-    "date": "2025-10-20 14:00:00",
-    "type": "SELL",
-    "code": "000688.XSHG",
-    "amount": 3,
-    "price": 1368.73,
-    "comment": "高位卖出000688.XSHG"
-  },
-  {
-    "date": "2025-10-22 14:00:00",
-    "type": "SELL",
-    "code": "000300.XSHG",
-    "amount": 2,
-    "price": 4574.83,
-    "comment": "高位卖出000300.XSHG"
-  },
-  {
-    "date": "2025-10-24 15:00:00",
-    "type": "SELL",
-    "code": "000688.XSHG",
-    "amount": 6,
-    "price": 1461.94,
-    "comment": "高位卖出000688.XSHG"
-  }
-]
+{
+  "transactions": [],
+  "snapshots": [
+    {
+      "timestamp": "2025-10-20 09:00:00",
+      "total_value": 10000.00,
+      "cash": 10000.00,
+      "trade_info": null,
+      "comment": "Portfolio initialized with starting capital.",
+      "holdings": {}
+    }
+  ]
+}

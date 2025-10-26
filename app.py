@@ -42,8 +42,9 @@ def save_custom_codes():
 
 @app.route('/api/lines')
 def api_lines():
-    # 获取基准日期参数
+    # Remove the default base_date value
     base_date = request.args.get('base_date')
+    
     # 获取自定义股票参数
     import json as _json
     codes_str = request.args.get('codes', '')
@@ -130,15 +131,21 @@ def api_lines():
     try:
         with open('trade_ops.json', 'r', encoding='utf-8') as f:
             ops = json.load(f)
-    except Exception:
-        ops = []
+            if not isinstance(ops, list) or not all(isinstance(op, dict) for op in ops):
+                raise ValueError("The content of trade_ops.json must be a list of dictionaries.")
+    except Exception as e:
+        print(f"Error loading or validating trade_ops.json: {e}")
+        ops = []  # Default to an empty list if validation fails
         
     # 读取今日点评
     try:
         with open('trade_today.json', 'r', encoding='utf-8') as f:
-            today_reviews = json.load(f)
-    except Exception:
-        today_reviews = []
+            today_reviews = json.load(f).get('stock_view', [])
+            if not isinstance(today_reviews, list) or not all(isinstance(review, dict) for review in today_reviews):
+                raise ValueError("The 'stock_view' in trade_today.json must be a list of dictionaries.")
+    except Exception as e:
+        print(f"Error loading or validating today_reviews: {e}")
+        today_reviews = []  # Default to an empty list if validation fails
         
     # 市值线基准点索引与labels
     base_idx3 = base_idx1  # 市值线与沪深300对齐
@@ -161,6 +168,9 @@ def api_lines():
         if not today_reviews or not price_arr or not labels:
             return
         for review in today_reviews:
+            if not isinstance(review, dict):
+                print(f"Skipping invalid review: {review}")
+                continue
             ts = str(review.get('timestamp'))
             idx = None
             for i, t in enumerate(labels):
@@ -377,6 +387,47 @@ def get_value_line_with_prices(ops, code, frequency='60m', count=60, base_idx=0)
     labels = [str(idx) for idx in dates]
     return labels, norm, value_prices
 
+
+# Process trade_ops.json snapshots
+try:
+    with open('trade_ops.json', 'r', encoding='utf-8') as f:
+        trade_ops = json.load(f)
+        snapshots = trade_ops.get('snapshots', [])
+        for snapshot in snapshots:
+            timestamp = snapshot.get('timestamp', 'N/A')
+            comment = snapshot.get('comment', '')
+            holdings = snapshot.get('holdings', {})
+            print(f"Snapshot at {timestamp}: {comment}")
+            print(f"Holdings: {holdings}")
+except Exception as e:
+    print(f"Error processing trade_ops.json: {e}")
+
+# Process trade_today.json portfolio analysis and stock operations
+try:
+    with open('trade_today.json', 'r', encoding='utf-8') as f:
+        trade_today = json.load(f)
+        portfolio_analysis = trade_today.get('portfolio_analysis', {})
+        stock_operations = trade_today.get('stock_operations', [])
+        stock_view = trade_today.get('stock_view', [])
+
+        # Print portfolio analysis summary
+        print("Portfolio Analysis:")
+        print(f"Market Summary: {portfolio_analysis.get('market_summary', '')}")
+        print(f"Risk Level: {portfolio_analysis.get('risk_level', '')}")
+        print(f"Overall Operation: {portfolio_analysis.get('overall_operation', '')}")
+        print(f"Trading Plan: {portfolio_analysis.get('trading_plan', '')}")
+
+        # Print stock operations
+        print("Stock Operations:")
+        for operation in stock_operations:
+            print(operation)
+
+        # Print stock views
+        print("Stock Views:")
+        for view in stock_view:
+            print(view)
+except Exception as e:
+    print(f"Error processing trade_today.json: {e}")
 
 if __name__ == '__main__':
     app.run(debug=True, port=5005, host='0.0.0.0')
