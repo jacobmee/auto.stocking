@@ -25,7 +25,7 @@
     <script>
     // 定义增大后的点半径
     const VISIBLE_POINT_RADIUS = 6;
-    const HOVER_POINT_RADIUS = 8;
+    const HOVER_POINT_RADIUS = 12;
     
         // 注册 annotation 3.x 插件到 Chart.js 3.x
         if (window.Chart && window.ChartAnnotation) {
@@ -120,13 +120,10 @@
                         backgroundColor: 'rgba(54,162,235,0.1)',
                         fill: false,
                         pointRadius: radii1,
-                        pointHoverRadius: function(context) {
-                            const radius = context.dataset.pointRadius;
-                            if (Array.isArray(radius)) {
-                                return radius[context.dataIndex] > 0 ? HOVER_POINT_RADIUS : 0;
-                            }
-                            return HOVER_POINT_RADIUS;
-                        },
+                        pointHoverRadius: radii1.map(r => r > 0 ? HOVER_POINT_RADIUS : 0),
+                        pointStyle: radii1.map(r => r > 0 ? 'circle' : 'circle'),
+                        pointBackgroundColor: radii1.map(r => r > 0 ? 'white' : 'rgba(54,162,235,1)'),
+                        pointHoverBackgroundColor: radii1.map(r => r > 0 ? 'rgba(54,162,235,1)' : 'rgba(54,162,235,1)'),
                         customPrices: data.price1,
                         code: meta[0].code
                     },
@@ -137,13 +134,10 @@
                         backgroundColor: 'rgba(75,192,192,0.1)',
                         fill: false,
                         pointRadius: radii2,
-                        pointHoverRadius: function(context) {
-                            const radius = context.dataset.pointRadius;
-                            if (Array.isArray(radius)) {
-                                return radius[context.dataIndex] > 0 ? HOVER_POINT_RADIUS : 0;
-                            }
-                            return HOVER_POINT_RADIUS;
-                        },
+                        pointHoverRadius: radii2.map(r => r > 0 ? HOVER_POINT_RADIUS : 0),
+                        pointStyle: radii2.map(r => r > 0 ? 'circle' : 'circle'),
+                        pointBackgroundColor: radii2.map(r => r > 0 ? 'white' : 'rgba(75,192,192,1)'),
+                        pointHoverBackgroundColor: radii2.map(r => r > 0 ? 'rgba(75,192,192,1)' : 'rgba(75,192,192,1)'),
                         customPrices: data.price2,
                         code: meta[1].code
                     },
@@ -153,26 +147,14 @@
                         borderColor: 'rgba(255,99,132,1)',
                         backgroundColor: 'rgba(255,99,132,0.1)',
                         fill: false,
-                        pointBackgroundColor: function(context) {
-                            const radii = context.dataset.pointRadius;
-                            const idx = context.dataIndex;
-                            // 仅对有点评的点应用白色背景
-                            if (Array.isArray(radii) && radii[idx] > 0) {
-                                return 'white';
-                            }
-                            return 'rgba(255,99,132,1)'; // 否则使用默认线色 (或直接返回线色)
-                        },
+                        pointRadius: radii3,
+                        pointHoverRadius: radii3.map(r => r > 0 ? HOVER_POINT_RADIUS : 0),
+                        pointStyle: radii3.map(r => r > 0 ? 'circle' : 'circle'),
+                        pointBackgroundColor: radii3.map(r => r > 0 ? 'white' : 'rgba(255,99,132,1)'),
+                        pointHoverBackgroundColor: radii3.map(r => r > 0 ? 'rgba(255,99,132,1)' : 'rgba(255,99,132,1)'),
                         pointBorderColor: 'rgba(255,99,132,1)',
                         pointBorderWidth: 2,
                         customPrices: data.price3,
-                        pointRadius: radii3,
-                        pointHoverRadius: function(context) {
-                            const radius = context.dataset.pointRadius;
-                            if (Array.isArray(radius)) {
-                                return radius[context.dataIndex] > 0 ? HOVER_POINT_RADIUS : 0;
-                            }
-                            return HOVER_POINT_RADIUS;
-                        },
                         code: meta[2].code
                     }
                 ]
