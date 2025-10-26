@@ -15,30 +15,41 @@
     </style>
 </head>
 <body>
-    <div id="baseDateDiv" style="position:absolute;top:24px;right:5vw;z-index:10;background:rgba(255,255,255,0.85);padding:4px 10px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,0.04);font-family:'Lato',Arial,sans-serif;font-size:12px;">
+    <div id="baseDateDiv" style="position:absolute;top:24px;right:5vw;z-index:10;background:rgba(255,255,255,0.85);padding:4px 10px 10px 10px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,0.04);font-family:'Lato',Arial,sans-serif;font-size:12px;min-width:220px;">
         <label style="font-family:'Lato',Arial,sans-serif;font-size:12px;">开赛日期: <input type="date" id="baseDateInput" value="2025-10-20" style="font-family:'Lato',Arial,sans-serif;font-size:12px;"> </label>
         <button id="baseDateBtn" style="font-family:'Lato',Arial,sans-serif;font-size:12px;">应用</button>
+        <div id="customStockArea" style="margin-top:8px;">
+            <div style="margin-bottom:2px;font-weight:bold;">自定义股票(最多5个):</div>
+            <div id="customStockList"></div>
+            <div style="margin-top:4px;">
+                <input id="customStockInput" type="text" maxlength="12" placeholder="股票代码" style="width:80px;font-size:12px;">
+                <button id="addCustomStockBtn" style="font-size:12px;">添加</button>
+            </div>
+        </div>
     </div>
     <div id="chart-container">
         <canvas id="lineChart"></canvas>
     </div>
+    <script src="/static/custom_code_loader.js"></script>
+    <script src="/static/custom_code_save.js"></script>
     <script>
     // 定义增大后的点半径
     const VISIBLE_POINT_RADIUS = 6;
     const HOVER_POINT_RADIUS = 12;
     
-        // 注册 annotation 3.x 插件到 Chart.js 3.x
-        if (window.Chart && window.ChartAnnotation) {
-            Chart.register(window.ChartAnnotation);
-        }
+    // 注册 annotation 3.x 插件到 Chart.js 3.x
+    if (window.Chart && window.ChartAnnotation) {
+        Chart.register(window.ChartAnnotation);
+    }
 
 
-    async function fetchData(baseDateStr) {
-        // 支持传递基准日期参数
+    async function fetchData(baseDateStr, customStocks) {
+        // 支持传递基准日期参数和自定义股票
         let url = '/api/lines';
-        if (baseDateStr) {
-            url += '?base_date=' + encodeURIComponent(baseDateStr);
-        }
+        let params = [];
+        if (baseDateStr) params.push('base_date=' + encodeURIComponent(baseDateStr));
+        if (customStocks && customStocks.length) params.push('codes=' + encodeURIComponent(customStocks.join(',')));
+        if (params.length) url += '?' + params.join('&');
         const resp = await fetch(url);
         return await resp.json();
     }
@@ -108,56 +119,101 @@
             baseIdx = data.labels.findIndex(lab => String(lab).slice(0,10) === baseDate);
         }
 
+        // ==========================================================
+        // ** 修复逻辑：构造完整的 datasets 数组 **
+        // ==========================================================
+        let datasets = [
+            {
+                label: meta[0].name,
+                data: data.line1,
+                borderColor: 'rgba(54,162,235,1)',
+                backgroundColor: 'rgba(54,162,235,0.1)',
+                fill: false,
+                pointRadius: radii1,
+                pointHoverRadius: radii1.map(r => r > 0 ? HOVER_POINT_RADIUS : 0),
+                pointStyle: radii1.map(r => r > 0 ? 'circle' : 'circle'),
+                pointBackgroundColor: radii1.map(r => r > 0 ? 'white' : 'rgba(54,162,235,1)'),
+                pointHoverBackgroundColor: radii1.map(r => r > 0 ? 'rgba(54,162,235,1)' : 'rgba(54,162,235,1)'),
+                customPrices: data.price1,
+                code: meta[0].code
+            },
+            {
+                label: meta[1].name,
+                data: data.line2,
+                borderColor: 'rgba(75,192,192,1)',
+                backgroundColor: 'rgba(75,192,192,0.1)',
+                fill: false,
+                pointRadius: radii2,
+                pointHoverRadius: radii2.map(r => r > 0 ? HOVER_POINT_RADIUS : 0),
+                pointStyle: radii2.map(r => r > 0 ? 'circle' : 'circle'),
+                pointBackgroundColor: radii2.map(r => r > 0 ? 'white' : 'rgba(75,192,192,1)'),
+                pointHoverBackgroundColor: radii2.map(r => r > 0 ? 'rgba(75,192,192,1)' : 'rgba(75,192,192,1)'),
+                customPrices: data.price2,
+                code: meta[1].code
+            },
+            {
+                label: meta[2].name,
+                data: data.line3,
+                borderColor: 'rgba(255,99,132,1)',
+                backgroundColor: 'rgba(255,99,132,0.1)',
+                fill: false,
+                pointRadius: radii3,
+                pointHoverRadius: radii3.map(r => r > 0 ? HOVER_POINT_RADIUS : 0),
+                pointStyle: radii3.map(r => r > 0 ? 'circle' : 'circle'),
+                pointBackgroundColor: radii3.map(r => r > 0 ? 'white' : 'rgba(255,99,132,1)'),
+                pointHoverBackgroundColor: radii3.map(r => r > 0 ? 'rgba(255,99,132,1)' : 'rgba(255,99,132,1)'),
+                pointBorderColor: 'rgba(255,99,132,1)',
+                pointBorderWidth: 2,
+                customPrices: data.price3,
+                code: meta[2].code
+            }
+        ];
+
+        // 动态添加自定义股票数据
+        if (data.customLines && Array.isArray(data.customLines) && data.customPrices && Array.isArray(data.customPrices)) {
+            const colors = [
+                'rgba(255,159,64,1)',  // 橙色
+                'rgba(153,102,255,1)', // 紫色
+                'rgba(255,205,86,1)',  // 黄色
+                'rgba(201,203,207,1)', // 灰色
+                'rgba(0,128,128,1)'    // 青色
+            ];
+            
+            const customDatasets = data.customLines.map((line, index) => {
+                const customPrices = data.customPrices[index];
+                // 使用 customStocks 变量获取代码名称
+                const customCode = customStocks[index] || `自定义${index + 1}`; 
+                const customMeta = meta[3 + index] || { name: customCode, code: customCode };
+                
+                const radii = getCommentRadii(customPrices);
+                const colorIndex = index % colors.length; 
+                const borderColor = colors[colorIndex];
+                const backgroundColor = borderColor.replace('1)', '0.1)'); // 用于背景填充
+
+                return {
+                    label: customMeta.name,
+                    data: line,
+                    borderColor: borderColor,
+                    backgroundColor: backgroundColor,
+                    fill: false,
+                    pointRadius: radii,
+                    pointHoverRadius: radii.map(r => r > 0 ? HOVER_POINT_RADIUS : 0),
+                    pointStyle: radii.map(r => r > 0 ? 'circle' : 'circle'),
+                    pointBackgroundColor: radii.map(r => r > 0 ? 'white' : borderColor),
+                    pointHoverBackgroundColor: radii.map(r => r > 0 ? borderColor : borderColor),
+                    customPrices: customPrices,
+                    code: customMeta.code
+                };
+            });
+            datasets = datasets.concat(customDatasets); // 拼接数组
+        }
+
         const chart = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: formattedLabels,
-                datasets: [
-                    {
-                        label: meta[0].name,
-                        data: data.line1,
-                        borderColor: 'rgba(54,162,235,1)',
-                        backgroundColor: 'rgba(54,162,235,0.1)',
-                        fill: false,
-                        pointRadius: radii1,
-                        pointHoverRadius: radii1.map(r => r > 0 ? HOVER_POINT_RADIUS : 0),
-                        pointStyle: radii1.map(r => r > 0 ? 'circle' : 'circle'),
-                        pointBackgroundColor: radii1.map(r => r > 0 ? 'white' : 'rgba(54,162,235,1)'),
-                        pointHoverBackgroundColor: radii1.map(r => r > 0 ? 'rgba(54,162,235,1)' : 'rgba(54,162,235,1)'),
-                        customPrices: data.price1,
-                        code: meta[0].code
-                    },
-                    {
-                        label: meta[1].name,
-                        data: data.line2,
-                        borderColor: 'rgba(75,192,192,1)',
-                        backgroundColor: 'rgba(75,192,192,0.1)',
-                        fill: false,
-                        pointRadius: radii2,
-                        pointHoverRadius: radii2.map(r => r > 0 ? HOVER_POINT_RADIUS : 0),
-                        pointStyle: radii2.map(r => r > 0 ? 'circle' : 'circle'),
-                        pointBackgroundColor: radii2.map(r => r > 0 ? 'white' : 'rgba(75,192,192,1)'),
-                        pointHoverBackgroundColor: radii2.map(r => r > 0 ? 'rgba(75,192,192,1)' : 'rgba(75,192,192,1)'),
-                        customPrices: data.price2,
-                        code: meta[1].code
-                    },
-                    {
-                        label: meta[2].name,
-                        data: data.line3,
-                        borderColor: 'rgba(255,99,132,1)',
-                        backgroundColor: 'rgba(255,99,132,0.1)',
-                        fill: false,
-                        pointRadius: radii3,
-                        pointHoverRadius: radii3.map(r => r > 0 ? HOVER_POINT_RADIUS : 0),
-                        pointStyle: radii3.map(r => r > 0 ? 'circle' : 'circle'),
-                        pointBackgroundColor: radii3.map(r => r > 0 ? 'white' : 'rgba(255,99,132,1)'),
-                        pointHoverBackgroundColor: radii3.map(r => r > 0 ? 'rgba(255,99,132,1)' : 'rgba(255,99,132,1)'),
-                        pointBorderColor: 'rgba(255,99,132,1)',
-                        pointBorderWidth: 2,
-                        customPrices: data.price3,
-                        code: meta[2].code
-                    }
-                ]
+                // ** 使用完整的 datasets 变量 **
+                datasets: datasets 
             },
             options: {
                 responsive: true,
@@ -260,19 +316,68 @@
         window._chartInstance = chart;
     }
     
+    // ===== 自定义股票管理 =====
+    let customStocks = [];
+    function renderCustomStockList() {
+        const listDiv = document.getElementById('customStockList');
+        listDiv.innerHTML = '';
+        customStocks.forEach((code, idx) => {
+            const span = document.createElement('span');
+            span.textContent = code;
+            span.style.cssText = 'display:inline-block;background:#f2f2f2;border-radius:3px;padding:1px 6px;margin:0 4px 2px 0;';
+            const delBtn = document.createElement('button');
+            delBtn.textContent = '×';
+            delBtn.title = '删除';
+            delBtn.style.cssText = 'margin-left:2px;font-size:12px;color:#c00;background:none;border:none;cursor:pointer;';
+            delBtn.onclick = function() {
+            customStocks.splice(idx,1);
+            renderCustomStockList();
+            triggerChartUpdate();
+            if (window.saveCustomCodes) window.saveCustomCodes();
+        };
+            span.appendChild(delBtn);
+            listDiv.appendChild(span);
+        });
+    }
+    document.getElementById('addCustomStockBtn').onclick = function() {
+        const input = document.getElementById('customStockInput');
+        let code = input.value.trim();
+        if (!code) return;
+        if (customStocks.length >= 5) { alert('最多添加5个自定义股票'); return; }
+        // 自动补全后缀
+        let codeNorm = code;
+        if (!/\.X[SA]HG$|\.KH$|\.XSHE$/i.test(code)) {
+            // 只输入数字时自动尝试主板、科创板
+            if (/^\d{6}$/.test(code)) {
+                const trySuffix = ['.XSHG', '.XSHE', '.XHSG', '.KH'];
+                for (let suf of trySuffix) {
+                    if (!customStocks.includes(code + suf)) {
+                        codeNorm = code + suf;
+                        break;
+                    }
+                }
+            }
+        }
+        if (customStocks.includes(codeNorm)) { alert('已存在'); return; }
+        customStocks.push(codeNorm);
+        input.value = '';
+        renderCustomStockList();
+        triggerChartUpdate();
+        // 🚨 修复：添加成功后也需要保存到后端
+        if (window.saveCustomCodes) window.saveCustomCodes(); 
+    };
+    function triggerChartUpdate() {
+        const val = document.getElementById('baseDateInput').value;
+        fetchData(val, customStocks).then(renderChart);
+    }
     // ===== 基准日期选择控件事件绑定 =====
     document.getElementById('baseDateBtn').onclick = function() {
-        const val = document.getElementById('baseDateInput').value;
-        if (val) {
-            fetchData(val).then(renderChart);
-        } else {
-            fetchData().then(renderChart);
-        }
+        triggerChartUpdate();
     };
 
     // 页面加载时自动用默认基准日期渲染
     const defaultBaseDate = document.getElementById('baseDateInput').value;
-    fetchData(defaultBaseDate).then(renderChart);
+    fetchData(defaultBaseDate, customStocks).then(renderChart);
 </script>
 </body>
 </html>

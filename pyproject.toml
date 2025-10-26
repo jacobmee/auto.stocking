@@ -6,11 +6,12 @@ authors = [
     { name = "Jacob.Mi", email = "jacob@metang.me" }
 ]
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.12"  # 推荐，明确只支持你使用的版本`
 dependencies = [
     "Flask",
     "pandas>=1.1.5",
     "requests",
+    "akshare"
 ]
 
 [tool.setuptools]
