@@ -1,3 +1,4 @@
+import logging
 import os
 import json
 from openai import OpenAI
@@ -7,9 +8,24 @@ import pandas as pd
 from Ashare import get_price
 from openai import OpenAI
     
-if __name__ == "__main__":
+# Setup logger for this module
+logger = logging.getLogger("STOCK.MANAGER")
+if not logger.hasHandlers():
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
+logger.setLevel(logging.INFO)
 
+def test_deepseek():
+    # Test the Deepseek API integration
+    try:
+        logger.info("Deepseek API response:")
+    except Exception as e:
+        logger.error(f"Error testing Deepseek API: {e}")
+
+def ask_deepseek():
     # Ensure the API key is fetched from the correct environment variable
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
@@ -47,10 +63,10 @@ if __name__ == "__main__":
     message += f"\n你的交易记录在这里:\n{trade_ops_json_string}"
     message += f"\n现在告诉我你的买卖决策，按照这个json文件的格式给我输出"
 
-    print("Sending prompt to Deepseek:")
-    print(prompt_content)
-    print("Sending message to Deepseek:")
-    print(message) 
+    logger.info("Sending prompt to Deepseek:")
+    logger.info(prompt_content)
+    logger.info("Sending message to Deepseek:")
+    logger.info(message)
     
     response = client.chat.completions.create(
         model="deepseek-reasoner",
@@ -61,7 +77,7 @@ if __name__ == "__main__":
         stream=False
     )
     
-    print(response.choices[0].message.content)
+    logger.info(response.choices[0].message.content)
 
     # Overwrite trade_today.json with response content
     try:
@@ -71,5 +87,5 @@ if __name__ == "__main__":
             json_data = json.loads(response_content)
             json.dump(json_data, f, ensure_ascii=False, indent=4)
     except Exception as e:
-        print(f"Error overwriting trade_today.json with response content: {e}")
+        logger.error(f"Error overwriting trade_today.json with response content: {e}")
 

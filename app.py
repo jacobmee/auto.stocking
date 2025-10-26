@@ -5,9 +5,40 @@ import sys # 修正：导入 sys 模块以解决 Ashare 数据获取时的依赖
 # from line_utils import get_normalized_line, get_value_line # 假设这些已在外部或被替换
 import pandas as pd
 import json
+import threading
+import time
+import logging
+import logging.handlers
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
+def setup_logger(name):
+    """Configure and return a logger with syslog handler."""
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
+
+    # Remove any existing handlers
+    logger.handlers = []
+
+    # Create syslog handler
+    syslog_handler = logging.handlers.SysLogHandler(address='/dev/log')
+    syslog_handler.setLevel(logging.INFO)
+
+    # Create formatter
+    formatter = logging.Formatter('%(name)s: %(levelname)s - %(message)s')
+    syslog_handler.setFormatter(formatter)
+
+    # Add handler to logger
+    logger.addHandler(syslog_handler)
+
+    # Prevent propagation to root logger
+    logger.propagate = False
+
+    return logger
+
+# Get logger
+logger = setup_logger('STOCKING')
 
 @app.route('/')
 def index():
@@ -36,7 +67,7 @@ def save_custom_codes():
         return jsonify({"message": "Custom codes successfully saved."}), 200
 
     except Exception as e:
-        print(f"Error saving custom codes: {e}")
+        logger.error(f"Error saving custom codes: {e}")
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
 
 
@@ -56,13 +87,13 @@ def api_lines():
     for code in input_codes:
         if '.' in code:
             checked_codes.append(code)
-            print(f"自定义股票尝试: {code} (已带后缀，直接查)")
+            logger.info(f"自定义股票尝试: {code} (已带后缀，直接查)")
         elif code.isdigit():
             found = False
             for suf in suffixes:
                 try_code = code + suf
                 df = get_price_df(try_code, frequency='60m', count=60)
-                print(f"自定义股票尝试: {try_code} -> {'有数据' if (df is not None and len(df)) else '无数据'}")
+                logger.info(f"自定义股票尝试: {try_code} -> {'有数据' if (df is not None and len(df)) else '无数据'}")
                 if df is not None and len(df):
                     checked_codes.append(try_code)
                     code_map[code] = try_code
@@ -78,7 +109,7 @@ def api_lines():
             with open('custom_code.json', 'w', encoding='utf-8') as f:
                 _json.dump(input_codes, f, ensure_ascii=False)
         except Exception as e:
-            print('写custom_code.json失败:', e)
+            logger.error(f'写custom_code.json失败: {e}')
     
     # 查找基准点索引
     def get_base_idx(df, base_date):
@@ -134,7 +165,7 @@ def api_lines():
             if not isinstance(ops, list) or not all(isinstance(op, dict) for op in ops):
                 raise ValueError("The content of trade_ops.json must be a list of dictionaries.")
     except Exception as e:
-        print(f"Error loading or validating trade_ops.json: {e}")
+        logger.error(f"Error loading or validating trade_ops.json: {e}")
         ops = []  # Default to an empty list if validation fails
         
     # 读取今日点评
@@ -152,7 +183,7 @@ def api_lines():
                     review['timestamp'] = today_date  # Default to today's date if missing
 
     except Exception as e:
-        print(f"Error loading or validating today_reviews: {e}")
+        logger.error(f"Error loading or validating today_reviews: {e}")
         today_reviews = []  # Default to an empty list if validation fails
         
     # 市值线基准点索引与labels
@@ -321,7 +352,7 @@ def api_lines():
             # 则回退到使用当前视图的第一个可见点作为归一化基准 (slice_start_idx)。
             if base_date and norm_base_idx == -1:
                 price_for_1000_base_idx = slice_start_idx
-                print(f"Warning: Base date {base_date} not found for {code}. Falling back to view start for normalization.")
+                logger.warning(f"Base date {base_date} not found for {code}. Falling back to view start for normalization.")
             elif norm_base_idx == -1:
                 # 如果没有 base_date，且 get_base_idx 返回 -1 (这不应该发生，因为默认返回 0)，则使用 0
                  price_for_1000_base_idx = 0
@@ -385,15 +416,15 @@ def api_lines():
 def get_price_df(code, frequency='60m', count=60):
     try:
         from Ashare import get_price
-        print(f"Fetching data for {code} with frequency {frequency} and count {count}.")
+        logger.info(f"Fetching data for {code} with frequency {frequency} and count {count}.")
         df = get_price(code, frequency=frequency, count=count)
         if df is None or df.empty:
-            print(f"No data returned for {code}.")
+            logger.warning(f"No data returned for {code}.")
         else:
-            print(f"Data fetched for {code}: {len(df)} rows.")
+            logger.info(f"Data fetched for {code}: {len(df)} rows.")
         return df
     except Exception as e:
-        print(f"Error fetching data for {code}: {e}")
+        logger.error(f"Error fetching data for {code}: {e}")
         return None
 
 def normalize_prices(prices, base_idx=0):
@@ -408,11 +439,11 @@ def normalize_prices(prices, base_idx=0):
 
 def get_value_line_with_prices(ops, code, frequency='60m', count=60, base_idx=0):
     df = get_price_df(code, frequency=frequency, count=60)
-    print('DEBUG 市值主行情长度:', len(df) if df is not None else None)
+    logger.debug(f'DEBUG 市值主行情长度: {len(df) if df is not None else None}')
     if df is not None:
-        print('DEBUG 市值主行情时间区间:', df.index[0] if len(df) else None, df.index[-1] if len(df) else None)
+        logger.debug(f'DEBUG 市值主行情时间区间: {df.index[0] if len(df) else None}, {df.index[-1] if len(df) else None}')
     if df is None or len(df) == 0:
-        print('DEBUG 市值行情数据为空')
+        logger.debug('DEBUG 市值行情数据为空')
         return [], [], []
     close = df['close'].values if df is not None else []
     dates = df.index
@@ -422,9 +453,9 @@ def get_value_line_with_prices(ops, code, frequency='60m', count=60, base_idx=0)
     code_close = {}
     for c in all_codes:
         dft = get_price_df(c, frequency=frequency, count=60)
-        print(f'DEBUG {c} 行情长度:', len(dft) if dft is not None else None)
+        logger.debug(f'DEBUG {c} 行情长度: {len(dft) if dft is not None else None}')
         if dft is not None and len(dft):
-            print(f'DEBUG {c} 行情时间区间:', dft.index[0], dft.index[-1])
+            logger.debug(f'DEBUG {c} 行情时间区间: {dft.index[0]}, {dft.index[-1]}')
         # 确保 code_close[c] 的长度与 dates 长度一致，否则填充 0
         code_close[c] = dft['close'].values if dft is not None and len(dft) == len(dates) else [0]*len(dates)
     shares = {c: 0 for c in all_codes}
@@ -490,10 +521,10 @@ try:
             timestamp = snapshot.get('timestamp', 'N/A')
             comment = snapshot.get('comment', '')
             holdings = snapshot.get('holdings', {})
-            print(f"Snapshot at {timestamp}: {comment}")
-            print(f"Holdings: {holdings}")
+            logger.info(f"Snapshot at {timestamp}: {comment}")
+            logger.info(f"Holdings: {holdings}")
 except Exception as e:
-    print(f"Error processing trade_ops.json: {e}")
+    logger.error(f"Error processing trade_ops.json: {e}")
 
 # Process trade_today.json portfolio analysis and stock operations
 try:
@@ -504,23 +535,78 @@ try:
         stock_view = trade_today.get('stock_view', [])
 
         # Print portfolio analysis summary
-        print("Portfolio Analysis:")
-        print(f"Market Summary: {portfolio_analysis.get('market_summary', '')}")
-        print(f"Risk Level: {portfolio_analysis.get('risk_level', '')}")
-        print(f"Overall Operation: {portfolio_analysis.get('overall_operation', '')}")
-        print(f"Trading Plan: {portfolio_analysis.get('trading_plan', '')}")
+        logger.info("Portfolio Analysis:")
+        logger.info(f"Market Summary: {portfolio_analysis.get('market_summary', '')}")
+        logger.info(f"Risk Level: {portfolio_analysis.get('risk_level', '')}")
+        logger.info(f"Overall Operation: {portfolio_analysis.get('overall_operation', '')}")
+        logger.info(f"Trading Plan: {portfolio_analysis.get('trading_plan', '')}")
 
         # Print stock operations
-        print("Stock Operations:")
+        logger.info("Stock Operations:")
         for operation in stock_operations:
-            print(operation)
+            logger.info(operation)
 
         # Print stock views
-        print("Stock Views:")
+        logger.info("Stock Views:")
         for view in stock_view:
-            print(view)
+            logger.info(view)
 except Exception as e:
-    print(f"Error processing trade_today.json: {e}")
+    logger.error(f"Error processing trade_today.json: {e}")
+
+
+def periodic_time_check():
+    while True:
+        try:
+            logger.info("Performing periodic time checking...")
+        except Exception as e:
+            logger.error(f"Error in periodic time_checking: {str(e)}")
+        time.sleep(60)
+
+# Start the periodic thread when the app starts
+threading.Thread(target=periodic_time_check, daemon=True).start()
+
+def run_daily_task_at(hour, minute, task_func):
+    def scheduler():
+        while True:
+            now = datetime.now()
+            next_run = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if now >= next_run:
+                next_run += timedelta(days=1)
+            sleep_seconds = (next_run - now).total_seconds()
+            time.sleep(sleep_seconds)
+            try:
+                task_func()
+            except Exception as e:
+                logger.error(f"Scheduled task error: {e}")
+    t = threading.Thread(target=scheduler, daemon=True)
+    t.start()
+
+# 示例：定义你要定时执行的任务
+import importlib
+
+def my_daily_task():
+    try:
+        stock_manager = importlib.import_module('stock_manager')
+        if hasattr(stock_manager, 'test_deepseek'):
+            stock_manager.test_deepseek()
+        else:
+            logger.warning('test_deepseek not found in stock_manager.py')
+    except Exception as e:
+        logger.error(f"Error running test_deepseek: {e}")
+
+
+# 每天下午 14:15 执行 ask_deepseek
+def my_daily_task():
+    try:
+        stock_manager = importlib.import_module('stock_manager')
+        if hasattr(stock_manager, 'ask_deepseek'):
+            stock_manager.ask_deepseek()
+        else:
+            logger.warning('ask_deepseek not found in stock_manager.py')
+    except Exception as e:
+        logger.error(f"Error running ask_deepseek: {e}")
+
+run_daily_task_at(14, 15, my_daily_task)
 
 if __name__ == '__main__':
     app.run(debug=True, port=5005, host='0.0.0.0')
