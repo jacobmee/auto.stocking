@@ -140,9 +140,17 @@ def api_lines():
     # 读取今日点评
     try:
         with open('trade_today.json', 'r', encoding='utf-8') as f:
-            today_reviews = json.load(f).get('stock_view', [])
+            today_data = json.load(f)
+            today_reviews = today_data.get('stock_view', [])
             if not isinstance(today_reviews, list) or not all(isinstance(review, dict) for review in today_reviews):
                 raise ValueError("The 'stock_view' in trade_today.json must be a list of dictionaries.")
+
+            # Ensure each review in today_reviews has a valid timestamp
+            today_date = pd.Timestamp.now().strftime('%Y-%m-%d')
+            for review in today_reviews:
+                if 'timestamp' not in review or not review['timestamp']:
+                    review['timestamp'] = today_date  # Default to today's date if missing
+
     except Exception as e:
         print(f"Error loading or validating today_reviews: {e}")
         today_reviews = []  # Default to an empty list if validation fails
@@ -163,41 +171,124 @@ def api_lines():
     else:
         line3_rounded = [round(float(x), 2) for x in line3]
         
-    # 点评注入
-    def inject_comments_to_price(price_arr, code, labels):
+    def get_base_code(code_str):
+        """提取股票代码的基础6位数字部分。"""
+        if not code_str:
+            return ""
+        # 查找所有数字部分并返回后6位
+        import re
+        digits = re.findall(r'\d+', code_str)
+        if digits:
+            return digits[-1][-6:]
+        return ""   
+
+    def inject_comments_to_price(price_arr, target_code, labels, today_reviews):
+        """
+        将点评数据注入到价格数组的 comment 字段中。
+        :param price_arr: 图表数据中的价格数组 (e.g., price1_objs)
+        :param target_code: 要匹配的股票代码 (e.g., '000300.XSHG')
+        :param labels: 图表的X轴时间标签数组
+        :param today_reviews: 包含点评信息的列表 (stock_view)
+        """
         if not today_reviews or not price_arr or not labels:
             return
-        for review in today_reviews:
-            if not isinstance(review, dict):
-                print(f"Skipping invalid review: {review}")
-                continue
-            ts = str(review.get('timestamp'))
-            idx = None
-            for i, t in enumerate(labels):
-                if str(t)[:16] == ts[:16]:
-                    idx = i
-                    break
-            if idx is not None:
-                # 检查索引是否在 price_arr 范围内
-                if idx < len(price_arr):
-                    for stock in review.get('stock_reviews', []):
-                        stock_code = str(stock.get('code'))
-                        # 兼容处理
-                        if stock_code == code or (stock_code.endswith('.XSHG') and stock_code == code) or (stock_code == code[-6:]) or (code[-6:] == stock_code[-6:]):
-                            cmt = stock.get('view')
-                            if cmt:
-                                # price_arr[idx] 保证是 [{"value":...}, {"value":...}] 结构
-                                old = price_arr[idx].get('comment','')
-                                price_arr[idx]['comment'] = (old+'\n' if old else '') + cmt
 
-    inject_comments_to_price(value_prices, '000300.XSHG', labels)
-    inject_comments_to_price(price1_objs, '000300.XSHG', labels)
-    inject_comments_to_price(price2_objs, '000688.XSHG', labels)
+        # 1. 预处理目标代码，方便匹配
+        target_base_code = get_base_code(target_code)
+        
+        # 2. 遍历所有点评
+        for review in today_reviews:
+            if not isinstance(review, dict) or 'view' not in review or 'code' not in review:
+                continue
+                
+            review_code = str(review.get('code'))
+            review_ts = str(review.get('date', review.get('timestamp', ''))) # 使用 'date' 或 'timestamp'
+            review_base_code = get_base_code(review_code)
+
+            # **代码匹配逻辑优化**：只要基础 6 位代码一致，就认为匹配
+            if not target_base_code or target_base_code != review_base_code:
+                continue
+            
+            # 3. 查找时间戳匹配的索引
+            idx = None
+            if review_ts:
+                # 尝试精确匹配 (精确到秒)
+                try:
+                    idx = labels.index(review_ts)
+                except ValueError:
+                    # 尝试匹配到分钟 (如果 labels 粒度较粗)
+                    ts_minute = review_ts[:16] # 'YYYY-MM-DD HH:MM'
+                    for i, t in enumerate(labels):
+                        if str(t)[:16] == ts_minute:
+                            idx = i
+                            break
+            else:
+                # 如果时间戳缺失，默认注入到最后一个点
+                idx = len(price_arr) - 1
+
+            # 4. 注入点评
+            if idx is not None and 0 <= idx < len(price_arr):
+                cmt = review.get('view')
+                if cmt:
+                    # 确保 price_arr[idx] 是一个 dict，并且有 comment 字段
+                    if not isinstance(price_arr[idx], dict):
+                        # 如果不是 dict，尝试修复或跳过 (这里假设后端逻辑保证它是 dict)
+                        price_arr[idx] = {'value': price_arr[idx]} # 假设它是裸值
+                    
+                    old = price_arr[idx].get('comment', '')
+                    
+                    # **核心修复**：使用 'date' 字段的时间，保持一致性
+                    date_prefix = review_ts if review_ts else "" 
+                    
+                    # 注入点评内容
+                    price_arr[idx]['comment'] = (old + '\n' if old else '') + cmt
+                    
+                    # 可以在这里添加一个标记，确认注入成功
+                    # print(f"Injected comment for {target_code} at index {idx}")
+
+
+    # 示例调用 (假设 today_reviews, value_prices, price1_objs, price2_objs, labels 都已定义)
+    # 假设 today_reviews = result_data.get('stock_view', [])
+
+    # 假设以下调用是正确的
+    inject_comments_to_price(price1_objs, '000300.XSHG', labels, today_reviews)
+    inject_comments_to_price(price2_objs, '000688.XSHG', labels, today_reviews)
+
     
+    # Reorganize /api/lines to include Portfolio Analysis, Stock Operations, and Stock Views in tooltips
+    for i, node in enumerate(value_prices):
+        # Embed Portfolio Analysis
+        if i == len(value_prices) - 1:  # Add Portfolio Analysis to the last time point
+            portfolio_comment = today_data.get('portfolio_analysis', {}).get('reasoning', '')
+            if portfolio_comment:
+                node['portfolio_analysis'] = {
+                    "market_summary": today_data['portfolio_analysis'].get('market_summary', ''),
+                    "risk_level": today_data['portfolio_analysis'].get('risk_level', ''),
+                    "overall_operation": today_data['portfolio_analysis'].get('overall_operation', ''),
+                    "trading_plan": today_data['portfolio_analysis'].get('trading_plan', ''),
+                    "portfolio_comment": portfolio_comment,
+                    "date": today_data['portfolio_analysis'].get('date', '')
+                }
+
+        # Embed Stock Operations
+        for operation in today_data.get('stock_operations', []):
+            if str(operation['date'])[:16] == str(labels[i])[:16]:
+                if 'stock_operations' not in node:
+                    node['stock_operations'] = []
+                node['stock_operations'].append({
+                    "date": operation['date'],
+                    "type": operation['type'],
+                    "code": operation['code'],
+                    "amount": operation['amount'],
+                    "price": operation['price'],
+                    "comment": operation['comment']
+                })
+
+
     # 新增辅助函数：安全填充数组
     def safe_pad(arr, target_len, pad_value=None):
         return list(arr) + [pad_value] * (target_len - len(arr))
-    
+
     # 函数：根据 labels[0] 的时间点查找自定义 df 的切片起点索引
     def get_slice_start_idx(df, labels):
         if not labels or df is None or len(df) == 0:
@@ -374,8 +465,10 @@ def get_value_line_with_prices(ops, code, frequency='60m', count=60, base_idx=0)
             "cash": round(cash,2),
             "stocks": {c: {"shares": shares[c], "price": round(code_close[c][i],2), "value": round(stock_value[c],2)} for c in all_codes}
         }
+        # Ensure comments are added to the value_prices array
         if comments:
-            node["comment"] = "\n".join(comments)
+            existing_comment = node.get("comment", "")
+            node["comment"] = (existing_comment + "\n" if existing_comment else "") + "\n".join(comments)
         value.append(v)
         value_prices.append(node)
     

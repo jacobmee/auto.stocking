@@ -1,6 +1,7 @@
 import os
 import json
 from openai import OpenAI
+import pandas as pd
 
 # 调用 deepseek 函数
 from Ashare import get_price
@@ -61,4 +62,14 @@ if __name__ == "__main__":
     )
     
     print(response.choices[0].message.content)
+
+    # Overwrite trade_today.json with response content
+    try:
+        with open('trade_today.json', 'w', encoding='utf-8') as f:
+            response_content = response.choices[0].message.content
+            # Assuming the response content is a valid JSON string
+            json_data = json.loads(response_content)
+            json.dump(json_data, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"Error overwriting trade_today.json with response content: {e}")
 

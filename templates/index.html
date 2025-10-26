@@ -37,14 +37,34 @@
     const VISIBLE_POINT_RADIUS = 6;
     const HOVER_POINT_RADIUS = 12;
     
-    // ** 【修复 1：将 customStocks 定义为全局/顶层变量】 **
+    // 将 customStocks 定义为全局/顶层变量
     let customStocks = []; 
 
     // 注册 annotation 插件
     if (window.Chart && window.ChartAnnotation) {
-        // 确保使用正确的注册方法
         Chart.register(window.ChartAnnotation);
     }
+
+    /**
+     * 通用的 borderDash 函数，用于根据全局基准索引 (window._chartBaseIdx) 绘制虚线。
+     * baseIdx 现在代表【线段开始变为实线】的那个点的索引。
+     */
+    function getDynamicBorderDash(ctx) {
+        // ctx.p0DataIndex 是当前段起点索引，ctx.p1DataIndex 是终点索引
+        const baseIdx = window._chartBaseIdx; // 这个值现在是 lineStartIdx
+        if (typeof baseIdx !== 'number' || baseIdx < 0) return [];
+        
+        // 逻辑：如果线段的终点索引严格小于 baseIdx，则使用虚线 [6, 6]
+        if (ctx.p1DataIndex < baseIdx) {
+            return [6, 6]; 
+        }
+        return []; // 实线
+    }
+    
+    // 将动态虚线逻辑封装到一个可重用的 segment 对象中
+    const DYNAMIC_DASH_SEGMENT = {
+        borderDash: getDynamicBorderDash
+    };
 
 
     async function fetchData(baseDateStr, codes) {
@@ -55,9 +75,6 @@
         // 使用传递进来的 codes 数组
         if (codes && codes.length) params.push('codes=' + encodeURIComponent(codes.join(',')));
         if (params.length) url += '?' + params.join('&');
-        
-        // ** 【调试点】 ** 检查请求的 URL 是否正确
-        // console.log("Fetching URL:", url); 
         
         const resp = await fetch(url);
         return await resp.json();
@@ -115,19 +132,38 @@
         const radii2 = getCommentRadii(data.price2);
         const radii3 = getCommentRadii(data.price3);
 
-        // 查找基准日期在labels中的索引
-        const baseDate = getCurrentBaseDate();
-        let baseIdx = -1;
+        // ==========================================================
+        // ** 核心修正：分离线条索引和垂直基准线索引 **
+        // ==========================================================
+        const baseDate = getCurrentBaseDate(); 
         
+        // 垂直基准线的索引：用于 Annotation
+        let baseLineIdx = -1;
+        // 虚实线切换的索引：用于 segment.borderDash 逻辑
+        let lineStartIdx = -1; 
+
         if (baseDate && data.labels && data.labels.length) {
-            baseIdx = data.labels.findIndex(lab => String(lab).slice(0,10) === baseDate);
+            // 查找第一个日期部分与 baseDate 匹配的索引
+            const firstMatchIndex = data.labels.findIndex(lab => String(lab).slice(0,10) === baseDate);
+            
+            if (firstMatchIndex !== -1) {
+                // 1. 垂直基准线：画在找到的第一个点（例如 9:30 的刻度）
+                baseLineIdx = firstMatchIndex;
+                
+                // 2. 线条虚实切换：必须在找到的点【之后】开始实线，所以索引要 +1
+                // 这样，线段 (Index 0 -> Index 1) 的 p1DataIndex (1) 就不满足 < lineStartIdx (1) 了。
+                lineStartIdx = firstMatchIndex + 1;
+
+                // 特殊处理：如果 firstMatchIndex 是最后一个点，+1 可能越界，但 Chart.js 会处理。
+                // 另外，如果 firstMatchIndex 是 0，lineStartIdx 就是 1。如果 baseDate 之前的点都存在，这是正确的。
+            }
         }
         
-        // ** 【调试点】 ** 检查基准日期索引是否找到
-        // console.log("Base Date:", baseDate, "Found Index:", baseIdx); 
-
+        // ** 将用于线条逻辑的索引赋给全局变量 **
+        window._chartBaseIdx = lineStartIdx;
+        
         // ==========================================================
-        // ** 构造 datasets 数组 **
+        // ** 构造 datasets 数组 (保持不变) **
         // ==========================================================
         let datasets = [
             // 沪深300
@@ -144,7 +180,8 @@
                 pointBorderColor: 'rgba(54,162,235,1)',
                 pointBorderWidth: 2,
                 customPrices: data.price1,
-                code: meta[0].code
+                code: meta[0].code,
+                segment: DYNAMIC_DASH_SEGMENT
             },
             // 科创50
             {
@@ -160,7 +197,8 @@
                 pointBorderColor: 'rgba(75,192,192,1)',
                 pointBorderWidth: 2,
                 customPrices: data.price2,
-                code: meta[1].code
+                code: meta[1].code,
+                segment: DYNAMIC_DASH_SEGMENT
             },
             // Deepseek
             {
@@ -175,13 +213,13 @@
                 pointHoverBackgroundColor: radii3.map(r => r > 0 ? 'rgba(255,99,132,1)' : 'rgba(255,99,132,1)'),
                 pointBorderColor: 'rgba(255,99,132,1)',
                 pointBorderWidth: 2,
-                borderDash: [6, 6], // Dashed line style
                 customPrices: data.price3,
-                code: meta[2].code
+                code: meta[2].code,
+                segment: DYNAMIC_DASH_SEGMENT
             }
         ];
 
-        // 动态添加自定义股票数据
+        // 动态添加自定义股票数据 (保持不变)
         if (data.customLines && Array.isArray(data.customLines) && data.customPrices && Array.isArray(data.customPrices)) {
             const colors = [
                 'rgba(255,159,64,1)',  // 橙色
@@ -193,14 +231,13 @@
             
             const customDatasets = data.customLines.map((line, index) => {
                 const customPrices = data.customPrices[index];
-                // ** 【修复 3：使用全局 customStocks 变量获取代码】 **
                 const customCode = customStocks[index] || `自定义${index + 1}`; 
                 const customMeta = meta[3 + index] || { name: customCode, code: customCode };
                 
                 const radii = getCommentRadii(customPrices);
                 const colorIndex = index % colors.length; 
                 const borderColor = colors[colorIndex];
-                const backgroundColor = borderColor.replace('1)', '0.1)'); // 用于背景填充
+                const backgroundColor = borderColor.replace('1)', '0.1)'); 
 
                 return {
                     label: customMeta.name,
@@ -215,10 +252,11 @@
                     pointBorderColor: borderColor,
                     pointBorderWidth: 2,
                     customPrices: customPrices,
-                    code: customMeta.code
+                    code: customMeta.code,
+                    segment: DYNAMIC_DASH_SEGMENT
                 };
             });
-            datasets = datasets.concat(customDatasets); // 拼接数组
+            datasets = datasets.concat(customDatasets);
         }
 
         const chart = new Chart(ctx, {
@@ -302,11 +340,12 @@
                         }
                     },
                     annotation: {
-                        annotations: baseIdx >= 0 ? {
+                        // ** 核心修正：使用 baseLineIdx 控制垂直线位置 **
+                        annotations: baseLineIdx >= 0 ? {
                                 baseLine: {
                                     type: 'line',
-                                    xMin: baseIdx,
-                                    xMax: baseIdx,
+                                    xMin: baseLineIdx, // 使用正确的垂直线索引
+                                    xMax: baseLineIdx, // 使用正确的垂直线索引
                                     borderColor: 'rgba(255, 140, 0, 0.3)',
                                     borderWidth: 4,
                                     borderDash: [6, 6],
@@ -322,14 +361,14 @@
                         } : {} 
                     }
                 },
-                scales: { x: { display: true }, y: { beginAtZero: false } } // 允许Y轴不从0开始
+                scales: { x: { display: true }, y: { beginAtZero: false } } 
             }
         });
 
         window._chartInstance = chart;
     }
     
-    // ===== 自定义股票管理 (逻辑微调) =====
+    // ===== 自定义股票管理 (保持不变) =====
     function renderCustomStockList() {
         const listDiv = document.getElementById('customStockList');
         listDiv.innerHTML = '';
@@ -345,7 +384,7 @@
                 customStocks.splice(idx,1);
                 renderCustomStockList();
                 triggerChartUpdate();
-                if (window.saveCustomCodes) window.saveCustomCodes(customStocks); // 传递当前列表
+                if (window.saveCustomCodes) window.saveCustomCodes(customStocks); 
             };
             span.appendChild(delBtn);
             listDiv.appendChild(span);
@@ -358,15 +397,10 @@
         if (customStocks.length >= 5) { alert('最多添加5个自定义股票'); return; }
         
         let codeNorm = code;
-        // 自动补全后缀逻辑可以根据实际后端要求调整
         if (!/\.X[SA]HG$|\.KH$|\.XSHE$/i.test(code)) {
-             // 简单的 A 股后缀处理，这里可以保持原样或根据您的环境进行更复杂的推断
             if (/^\d{6}$/.test(code)) {
-                if (code.startsWith('60') || code.startsWith('00') || code.startsWith('30')) {
-                    // 假设主要在 A 股市场
-                    if (code.startsWith('60')) codeNorm = code + '.XSHG';
-                    else if (code.startsWith('00') || code.startsWith('30')) codeNorm = code + '.XSHE';
-                }
+                if (code.startsWith('60')) codeNorm = code + '.XSHG';
+                else if (code.startsWith('00') || code.startsWith('30')) codeNorm = code + '.XSHE';
             }
         }
         
@@ -379,29 +413,25 @@
     };
     function triggerChartUpdate() {
         const val = document.getElementById('baseDateInput').value;
-        // ** 传递 customStocks 变量 **
+        // 传递 customStocks 变量
         fetchData(val, customStocks).then(renderChart);
     }
-    // ===== 基准日期选择控件事件绑定 =====
+    // ===== 基准日期选择控件事件绑定 (保持不变) =====
     document.getElementById('baseDateBtn').onclick = function() {
         triggerChartUpdate();
     };
 
-    // ** 【修复 4：初始化逻辑】 **
-    // 页面加载时执行的初始化函数
+    // ** 【初始化逻辑】 (保持不变) **
     function initializeChart() {
-        // 尝试从本地加载自定义代码 (假设 custom_code_loader.js 定义了 loadCustomCodes)
         if (window.loadCustomCodes) {
             customStocks = window.loadCustomCodes() || [];
         }
         renderCustomStockList();
         
         const defaultBaseDate = document.getElementById('baseDateInput').value;
-        // 使用加载的自定义股票代码进行首次渲染
         fetchData(defaultBaseDate, customStocks).then(renderChart);
     }
 
-    // 监听 DOMContentLoaded 或直接调用 (因为脚本在 body 底部)
     initializeChart();
 </script>
 </body>
