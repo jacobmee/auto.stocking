@@ -5,12 +5,20 @@
     <title>股票对比展示</title>
     <link href="https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
     <style>
-        body { font-family: 'Lato', Arial, sans-serif; margin: 40px; }
+        body, input, button, select, label {
+            font-family: 'Lato', Arial, sans-serif;
+        }
+        body { margin: 40px; }
         #chart-container { width: 90vw; max-width: 1200px; margin: auto; }
     </style>
 </head>
 <body>
+    <div id="baseDateDiv" style="position:absolute;top:24px;right:5vw;z-index:10;background:rgba(255,255,255,0.85);padding:4px 10px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,0.04);font-family:'Lato',Arial,sans-serif;font-size:12px;">
+        <label style="font-family:'Lato',Arial,sans-serif;font-size:12px;">开赛日期: <input type="date" id="baseDateInput" value="2025-10-20" style="font-family:'Lato',Arial,sans-serif;font-size:12px;"> </label>
+        <button id="baseDateBtn" style="font-family:'Lato',Arial,sans-serif;font-size:12px;">应用</button>
+    </div>
     <div id="chart-container">
         <canvas id="lineChart"></canvas>
     </div>
@@ -19,29 +27,32 @@
     const VISIBLE_POINT_RADIUS = 6;
     const HOVER_POINT_RADIUS = 8;
     
-    async function fetchData() {
-        // 假设您的后端接口 /api/lines 返回了所需的数据
-        // 为了方便本地测试，我提供一个虚拟数据结构
-        
-        const resp = await fetch('/api/lines'); 
+        // 注册 annotation 3.x 插件到 Chart.js 3.x
+        if (window.Chart && window.ChartAnnotation) {
+            Chart.register(window.ChartAnnotation);
+        }
+
+
+    async function fetchData(baseDateStr) {
+        // 支持传递基准日期参数
+        let url = '/api/lines';
+        if (baseDateStr) {
+            url += '?base_date=' + encodeURIComponent(baseDateStr);
+        }
+        const resp = await fetch(url);
         return await resp.json();
-        
     }
 
     /**
      * 根据 priceX 数据计算每个点的半径。
-     * 有 comment 字段的节点显示空心圆，否则为0。
-     * @param {Array<Object|number>} prices - priceX 数组
-     * @returns {Array<number>} - 每个点的半径
      */
     function getCommentRadii(prices) {
         if (!prices || prices.length === 0) return [];
-        // 所有有点评的节点都用同样的半径，最后一个节点不再特殊放大
-        return prices.map((p) => (p && typeof p === 'object' && p.comment) ? VISIBLE_POINT_RADIUS : 0);
+        return prices.map((p) => (p && typeof p === 'object' && p.comment && p.comment.trim() !== '') ? VISIBLE_POINT_RADIUS : 0);
     }
 
 
-    // 使用 Lato 作为 Chart.js 的默认字体
+    // 使用 Lato 作为 Chart.js 的全局默认字体（3.x 只支持全局设置）
     if (window.Chart && Chart.defaults) {
         Chart.defaults.font.family = 'Lato, Arial, sans-serif';
     }
@@ -49,7 +60,7 @@
     function formatLabelTimestr(s) {
         // 输入类似 '2025-09-26 10:30:00'，输出 'Sep 26 10:30' 形式
         const d = new Date(s);
-        if (isNaN(d.getTime())) return s; // 使用 getTime() 检查 Date 对象的有效性
+        if (isNaN(d.getTime())) return s;
         const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
         const mon = months[d.getMonth()];
         const dd = String(d.getDate()).padStart(2, '0');
@@ -58,8 +69,20 @@
         return `${mon} ${dd} ${hh}:${min}`;
     }
 
+    let chartInstance = window._chartInstance;
+    // 获取当前基准日期（yyyy-mm-dd），无则返回空串
+    function getCurrentBaseDate() {
+        const input = document.getElementById('baseDateInput');
+        // 确保元素存在且有值
+        return input && input.value ? input.value : '';
+    }
+
     function renderChart(data) {
         const ctx = document.getElementById('lineChart').getContext('2d');
+        // 销毁旧实例，防止多次渲染叠加
+        if (window._chartInstance) {
+            window._chartInstance.destroy();
+        }
         // 格式化 x 轴标签
         const formattedLabels = (data.labels || []).map(formatLabelTimestr);
         // 线的名字和代码映射
@@ -68,10 +91,22 @@
             {name: '科创50', code: '000688.XSHG'},
             {name: 'Deepseek', code: 'Deepseek'}
         ];
-    // 三条线都支持点评节点的空心圆
-    const radii1 = getCommentRadii(data.price1);
-    const radii2 = getCommentRadii(data.price2);
-    const radii3 = getCommentRadii(data.price3);
+        
+        // 计算点评半径
+        const radii1 = getCommentRadii(data.price1);
+        const radii2 = getCommentRadii(data.price2);
+        const radii3 = getCommentRadii(data.price3);
+
+        // 查找基准日期在labels中的索引
+        const baseDate = getCurrentBaseDate();
+        let baseIdx = -1;
+        
+        // ** 【关键检查点】 **
+        // 确保 baseDate 有值，且能在 labels 中找到对应日期
+        if (baseDate && data.labels && data.labels.length) {
+            // 查找标签中日期部分与输入日期匹配的第一个索引
+            baseIdx = data.labels.findIndex(lab => String(lab).slice(0,10) === baseDate);
+        }
 
         const chart = new Chart(ctx, {
             type: 'line',
@@ -86,25 +121,11 @@
                         fill: false,
                         pointRadius: radii1,
                         pointHoverRadius: function(context) {
-                            // 悬停时该点变大
                             const radius = context.dataset.pointRadius;
                             if (Array.isArray(radius)) {
-                                return radius[context.dataIndex] > 0 ? VISIBLE_POINT_RADIUS + 6 : 0;
+                                return radius[context.dataIndex] > 0 ? HOVER_POINT_RADIUS : 0;
                             }
-                            return VISIBLE_POINT_RADIUS + 6;
-                        },
-                        pointStyle: function(context) {
-                            // 悬停时该点为实心，其余为空心
-                            const radius = context.dataset.pointRadius;
-                            const hovered = context.active || false;
-                            // Chart.js 3/4: context.active为true表示悬停
-                            if (Array.isArray(radius) && radius[context.dataIndex] > 0 && context.active) {
-                                return 'circle'; // 实心
-                            }
-                            if (Array.isArray(radius) && radius[context.dataIndex] > 0) {
-                                return 'circle'; // 空心（Chart.js 4已不区分circle/point）
-                            }
-                            return false;
+                            return HOVER_POINT_RADIUS;
                         },
                         customPrices: data.price1,
                         code: meta[0].code
@@ -119,9 +140,9 @@
                         pointHoverRadius: function(context) {
                             const radius = context.dataset.pointRadius;
                             if (Array.isArray(radius)) {
-                                return radius[context.dataIndex] > 0 ? VISIBLE_POINT_RADIUS + 6 : 0;
+                                return radius[context.dataIndex] > 0 ? HOVER_POINT_RADIUS : 0;
                             }
-                            return VISIBLE_POINT_RADIUS + 6;
+                            return HOVER_POINT_RADIUS;
                         },
                         customPrices: data.price2,
                         code: meta[1].code
@@ -133,13 +154,13 @@
                         backgroundColor: 'rgba(255,99,132,0.1)',
                         fill: false,
                         pointBackgroundColor: function(context) {
-                            // 悬停时该点为线色，否则为白色
+                            const radii = context.dataset.pointRadius;
                             const idx = context.dataIndex;
-                            const active = context.chart.getActiveElements();
-                            if (active && active.length && active[0].datasetIndex === context.datasetIndex && active[0].index === idx) {
-                                return context.dataset.borderColor;
+                            // 仅对有点评的点应用白色背景
+                            if (Array.isArray(radii) && radii[idx] > 0) {
+                                return 'white';
                             }
-                            return 'white';
+                            return 'rgba(255,99,132,1)'; // 否则使用默认线色 (或直接返回线色)
                         },
                         pointBorderColor: 'rgba(255,99,132,1)',
                         pointBorderWidth: 2,
@@ -148,9 +169,9 @@
                         pointHoverRadius: function(context) {
                             const radius = context.dataset.pointRadius;
                             if (Array.isArray(radius)) {
-                                return radius[context.dataIndex] > 0 ? VISIBLE_POINT_RADIUS + 6 : 0;
+                                return radius[context.dataIndex] > 0 ? HOVER_POINT_RADIUS : 0;
                             }
-                            return VISIBLE_POINT_RADIUS + 6;
+                            return HOVER_POINT_RADIUS;
                         },
                         code: meta[2].code
                     }
@@ -167,7 +188,6 @@
                     intersect: true,
                     animationDuration: 0
                 },
-                // 保留默认动画（渐入渐出），仅hover时无动画
                 plugins: {
                     legend: { position: 'top', labels: { font: { size: 16 } } },
                     tooltip: {
@@ -183,18 +203,19 @@
                                 const radii = ds.pointRadius || [];
                                 // 只在有点评节点时显示tooltip
                                 if (Array.isArray(radii) && radii[idx] === 0) return '';
+                                
                                 // Deepseek（市值线）详细tooltip
                                 if (label === 'Deepseek' && price && typeof price === 'object') {
                                     const lines = [];
-                                    lines.push(`Deepseek (归一化): ${val}`);
-                                    lines.push(`总价值 (RMB): ${price.total}`);
-                                    lines.push(`现金 (RMB): ${price.cash}`);
+                                    lines.push(`Deepseek (归一化): ${val.toFixed(2)}`);
+                                    lines.push(`总价值 (RMB): ${price.total ? price.total.toFixed(2) : 'N/A'}`);
+                                    lines.push(`现金 (RMB): ${price.cash ? price.cash.toFixed(2) : 'N/A'}`);
                                     const stocks = price.stocks || {};
                                     for (const code in stocks) {
                                         if (stocks.hasOwnProperty(code)) {
                                             const stock = stocks[code];
                                             lines.push(
-                                                `  ${code}: 股数 ${stock.shares}, 价格 ${stock.price}, 市值 ${stock.value}`
+                                                `  ${code}: 股数 ${stock.shares}, 价格 ${stock.price ? stock.price.toFixed(2) : 'N/A'}, 市值 ${stock.value ? stock.value.toFixed(2) : 'N/A'}`
                                             );
                                         }
                                     }
@@ -203,18 +224,19 @@
                                     }
                                     return lines;
                                 }
+                                
                                 // 其他线：如有点评，优先展示点评，否则展示数值
-                                if (price && typeof price === 'object' && price.comment) {
-                                    return [`${label}: ${val}`, '点评: ' + price.comment];
+                                if (price && typeof price === 'object' && price.comment && price.comment.trim() !== '') {
+                                    const originalPrice = typeof price === 'object' ? price.value || price.total : price;
+                                    return [`${label}: ${val.toFixed(2)} (原始价格: ${originalPrice.toFixed(2)})`, '点评: ' + price.comment];
                                 } else if (price !== undefined) {
                                     const originalPrice = typeof price === 'object' ? price.value || price.total : price;
-                                    return `${label}: ${val} (原始价格: ${originalPrice})`;
+                                    return `${label}: ${val.toFixed(2)} (原始价格: ${originalPrice.toFixed(2)})`;
                                 } else {
-                                    return `${label}: ${val}`;
+                                    return `${label}: ${val.toFixed(2)}`;
                                 }
                             },
                             title: function(context) {
-                                // 只在有点评节点时显示title
                                 if (context && context.length > 0) {
                                     const ds = context[0].dataset;
                                     const idx = context[0].dataIndex;
@@ -224,16 +246,51 @@
                                 return context[0].label;
                             }
                         }
+                    },
+                    annotation: {
+                        // ** 【修复 2：逻辑检查】 **
+                        // 只有当 baseIdx >= 0 (即找到匹配日期) 时，才会生成 annotations 对象
+                        annotations: baseIdx >= 0 ? {
+                                baseLine: {
+                                    type: 'line',
+                                    xMin: baseIdx,
+                                    xMax: baseIdx,
+                                    borderColor: 'rgba(255, 140, 0, 0.3)',
+                                    borderWidth: 4,
+                                    borderDash: [6, 6],
+                                    label: {
+                                        display: true,
+                                        content: '基准',
+                                        position: 'start',
+                                        backgroundColor: 'rgba(255, 140, 0, 0.85)',
+                                        color: 'white',
+                                        font: { weight: 'bold' }
+                                    }
+                                }
+                        } : {} // 如果未找到，返回空对象，不绘制
                     }
                 },
                 scales: { x: { display: true }, y: { display: true } }
             }
         });
 
-        // 已移除自定义 Hover highlight 逻辑，彻底避免抖动
+        // 保存实例，便于下次销毁
+        window._chartInstance = chart;
     }
     
-    fetchData().then(renderChart);
+    // ===== 基准日期选择控件事件绑定 =====
+    document.getElementById('baseDateBtn').onclick = function() {
+        const val = document.getElementById('baseDateInput').value;
+        if (val) {
+            fetchData(val).then(renderChart);
+        } else {
+            fetchData().then(renderChart);
+        }
+    };
+
+    // 页面加载时自动用默认基准日期渲染
+    const defaultBaseDate = document.getElementById('baseDateInput').value;
+    fetchData(defaultBaseDate).then(renderChart);
 </script>
 </body>
 </html>
