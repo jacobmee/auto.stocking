@@ -82,11 +82,32 @@
 
     /**
      * 根据 priceX 数据计算每个点的半径。
+     * * @param {Array} prices - 价格/组合数据数组
+     * @param {string} code - 股票代码，用于区分 Deepseek
      */
-    function getCommentRadii(prices) {
+    function getCommentRadii(prices, code) {
         if (!prices || prices.length === 0) return [];
-        // 确保 comment 不为空或纯空格
-        return prices.map((p) => (p && typeof p === 'object' && p.comment && p.comment.trim() !== '') ? VISIBLE_POINT_RADIUS : 0);
+        
+        return prices.map((p) => {
+            if (!p || typeof p !== 'object') return 0;
+
+            // 1. 通用规则：检查顶级 comment
+            if (p.comment && p.comment.trim() !== '') {
+                return VISIBLE_POINT_RADIUS;
+            }
+
+            // 2. Deepseek 特殊规则：检查 portfolio_analysis 或 stock_operations
+            if (code === 'Deepseek') {
+                const hasAnalysis = p.portfolio_analysis && Object.keys(p.portfolio_analysis).length > 0;
+                const hasOperations = Array.isArray(p.stock_operations) && p.stock_operations.length > 0;
+                
+                if (hasAnalysis || hasOperations) {
+                    return VISIBLE_POINT_RADIUS;
+                }
+            }
+
+            return 0; // 否则，点半径为 0
+        });
     }
 
 
@@ -106,6 +127,32 @@
         const min = String(d.getMinutes()).padStart(2, '0');
         return `${mon} ${dd} ${hh}:${min}`;
     }
+
+    /**
+     * 自定义文本换行函数 (适用于中文，按字符数强制换行)
+     * @param {string} text - 需要换行的文本
+     * @param {number} maxChars - 每行最大字符数，默认设置为 15，以适应较窄的 tooltip
+     * @returns {string[]} - 包含换行符的字符串数组
+     */
+    function wordWrap(text, maxChars = 15) {
+        if (!text || text.length === 0) {
+            return [''];
+        }
+        
+        const lines = [];
+        let startIndex = 0;
+        
+        while (startIndex < text.length) {
+            // 从 startIndex 开始截取 maxChars 长度的子串
+            let endIndex = Math.min(startIndex + maxChars, text.length);
+            let line = text.substring(startIndex, endIndex);
+            lines.push(line);
+            startIndex = endIndex;
+        }
+
+        return lines;
+    }
+
 
     let chartInstance = window._chartInstance;
     
@@ -127,10 +174,10 @@
             {name: 'Deepseek', code: 'Deepseek'}
         ];
         
-        // 计算点评半径
-        const radii1 = getCommentRadii(data.price1);
-        const radii2 = getCommentRadii(data.price2);
-        const radii3 = getCommentRadii(data.price3);
+        // ** 核心修正：传递 code 参数给 getCommentRadii **
+        const radii1 = getCommentRadii(data.price1, meta[0].code);
+        const radii2 = getCommentRadii(data.price2, meta[1].code);
+        const radii3 = getCommentRadii(data.price3, meta[2].code); // Deepseek
 
         // ==========================================================
         // ** 核心修正：分离线条索引和垂直基准线索引 **
@@ -151,11 +198,7 @@
                 baseLineIdx = firstMatchIndex;
                 
                 // 2. 线条虚实切换：必须在找到的点【之后】开始实线，所以索引要 +1
-                // 这样，线段 (Index 0 -> Index 1) 的 p1DataIndex (1) 就不满足 < lineStartIdx (1) 了。
                 lineStartIdx = firstMatchIndex + 1;
-
-                // 特殊处理：如果 firstMatchIndex 是最后一个点，+1 可能越界，但 Chart.js 会处理。
-                // 另外，如果 firstMatchIndex 是 0，lineStartIdx 就是 1。如果 baseDate 之前的点都存在，这是正确的。
             }
         }
         
@@ -200,14 +243,14 @@
                 code: meta[1].code,
                 segment: DYNAMIC_DASH_SEGMENT
             },
-            // Deepseek
+            // Deepseek (红线)
             {
                 label: meta[2].name,
                 data: data.line3,
                 borderColor: 'rgba(255,99,132,1)',
                 backgroundColor: 'rgba(255,99,132,0.1)',
                 fill: false,
-                pointRadius: radii3,
+                pointRadius: radii3, // 使用了修正后的 radii3
                 pointHoverRadius: radii3.map(r => r > 0 ? HOVER_POINT_RADIUS : 0),
                 pointBackgroundColor: radii3.map(r => r > 0 ? 'white' : 'rgba(255,99,132,1)'),
                 pointHoverBackgroundColor: radii3.map(r => r > 0 ? 'rgba(255,99,132,1)' : 'rgba(255,99,132,1)'),
@@ -234,7 +277,8 @@
                 const customCode = customStocks[index] || `自定义${index + 1}`; 
                 const customMeta = meta[3 + index] || { name: customCode, code: customCode };
                 
-                const radii = getCommentRadii(customPrices);
+                // ** 核心修正：传递 code 参数给 getCommentRadii **
+                const radii = getCommentRadii(customPrices, customCode);
                 const colorIndex = index % colors.length; 
                 const borderColor = colors[colorIndex];
                 const backgroundColor = borderColor.replace('1)', '0.1)'); 
@@ -281,6 +325,13 @@
                     tooltip: {
                         mode: 'nearest',
                         intersect: true,
+                        padding: {
+                            top: 10,    // 增加顶部填充
+                            right: 8,   // 减少右侧填充，以减少宽度
+                            bottom: 10, // 增加底部填充
+                            left: 8     // 减少左侧填充，以减少宽度
+                        },
+                        bodySpacing: 4, // 增加行间距，以增加高度
                         callbacks: {
                             label: function(context) {
                                 const ds = context.dataset;
@@ -289,12 +340,13 @@
                                 const val = context.parsed.y;
                                 const price = ds.customPrices ? ds.customPrices[idx] : undefined;
                                 const radii = ds.pointRadius || [];
-                                // 只在有点评节点时显示tooltip
+                                
+                                // 根据 Deepseek 逻辑修改的 getCommentRadii 结果进行过滤
                                 if (Array.isArray(radii) && radii[idx] === 0) return '';
                                 
                                 // Deepseek（市值线）详细tooltip
                                 if (label === 'Deepseek' && price && typeof price === 'object') {
-                                    const lines = [];
+                                    let lines = [];
                                     lines.push(`Deepseek (归一化): ${val.toFixed(2)}`);
                                     lines.push(`总价值 (RMB): ${price.total ? price.total.toFixed(2) : 'N/A'}`);
                                     lines.push(`现金 (RMB): ${price.cash ? price.cash.toFixed(2) : 'N/A'}`);
@@ -307,24 +359,73 @@
                                             );
                                         }
                                     }
-                                    if (typeof price.comment === 'string' && price.comment.trim() !== '') {
-                                        lines.push('备注: ' + price.comment);
+                                    
+                                    // 显示 portfolio_analysis
+                                    if (price.portfolio_analysis) {
+                                        const pa = price.portfolio_analysis;
+                                        lines.push('【组合分析】');
+                                        if (pa.date) lines.push(`时间: ${pa.date}`);
+                                        
+                                        // === 核心修正：应用新的 wordWrap 函数，并为每行添加前缀（默认为 15 个字符换行）===
+                                        if (pa.market_summary) {
+                                            lines.push('市场综述:');
+                                            // 使用 3 个空格作为缩进，让换行的内容与标题区分开
+                                            const wrappedSummary = wordWrap(pa.market_summary, 15).map(line => '   ' + line); 
+                                            lines.push(...wrappedSummary);
+                                        }
+                                        if (pa.risk_level) lines.push(`风险等级: ${pa.risk_level}`);
+                                        if (pa.overall_operation) lines.push(`操作建议: ${pa.overall_operation}`);
+                                        if (pa.trading_plan) {
+                                            lines.push('交易计划:');
+                                            // 使用 3 个空格作为缩进
+                                            const wrappedPlan = wordWrap(pa.trading_plan, 15).map(line => '   ' + line);
+                                            lines.push(...wrappedPlan);
+                                        }
+                                        // 组合点评如果很长，也进行换行处理
+                                        if (pa.portfolio_comment) {
+                                            lines.push('点评:');
+                                            const wrappedComment = wordWrap(pa.portfolio_comment, 15).map(line => '   ' + line);
+                                            lines.push(...wrappedComment);
+                                        }
+                                        // ======================================
                                     }
-                                    return lines;
+                                    
+                                    // 显示 stock_operations
+                                    if (Array.isArray(price.stock_operations) && price.stock_operations.length > 0) {
+                                        lines.push('【操作记录】');
+                                        price.stock_operations.forEach(op => {
+                                            // 确保字段存在
+                                            const amount = op.amount !== undefined ? op.amount : 'N/A';
+                                            const priceVal = op.price !== undefined ? op.price : 'N/A';
+                                            const comment = op.comment !== undefined ? op.comment : '';
+                                            // 简化日期显示，保持操作记录单行显示
+                                            lines.push(`${op.date.substring(5, 16)} ${op.code} ${op.type} 数量:${amount} 价格:${priceVal} 备注:${comment}`);
+                                        });
+                                    }
+                                    
+                                    // 最终显示 Deepseek 的 general comment
+                                    if (typeof price.comment === 'string' && price.comment.trim() !== '') {
+                                        lines.push('备注:');
+                                        const wrappedGeneralComment = wordWrap(price.comment, 15).map(line => '   ' + line);
+                                        lines.push(...wrappedGeneralComment);
+                                    }
+                                    
+                                    return lines; 
                                 }
                                 
                                 // 其他线：如有点评，优先展示点评，否则展示数值
                                 if (price && typeof price === 'object' && price.comment && price.comment.trim() !== '') {
+                                    // 仅有点评时，返回两行：归一化值(原始值) + 点评
                                     const originalPrice = typeof price === 'object' ? price.value || price.total : price;
-                                    return [`${label}: ${val.toFixed(2)} (原始价格: ${originalPrice.toFixed(2)})`, '点评: ' + price.comment];
+                                    // 对通用点评也进行换行处理
+                                    const wrappedComment = wordWrap(price.comment, 30).map(line => '   ' + line); // 默认非 Deepseek 的点评给更多字符
+                                    return [`${label}: ${val.toFixed(2)} (原始价格: ${originalPrice.toFixed(2)})`, '点评: '].concat(wrappedComment);
                                 } else if (price !== undefined) {
+                                    // 仅有值，没有点评时，返回一行：归一化值(原始值)
                                     const originalPrice = typeof price === 'object' ? price.value || price.total : price;
-                                    // 检查 price 数组中是否存在 comment，以便统一处理非 Deepseek 线
-                                    if (typeof price === 'object' && price.comment && price.comment.trim() !== '') {
-                                        return [`${label}: ${val.toFixed(2)} (原始价格: ${originalPrice.toFixed(2)})`, '点评: ' + price.comment];
-                                    }
                                     return `${label}: ${val.toFixed(2)} (原始价格: ${originalPrice.toFixed(2)})`;
                                 } else {
+                                    // 既不是Deepseek线，也没有自定义价格数据，只返回归一化值
                                     return `${label}: ${val.toFixed(2)}`;
                                 }
                             },
@@ -333,6 +434,7 @@
                                     const ds = context[0].dataset;
                                     const idx = context[0].dataIndex;
                                     const radii = ds.pointRadius || [];
+                                    // 仅当点半径大于0时才显示标题
                                     if (Array.isArray(radii) && radii[idx] === 0) return '';
                                 }
                                 return context[0].label;
