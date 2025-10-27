@@ -85,7 +85,7 @@ def ask_deepseek():
     # Save response content to a file named with the current date (YYYY-MMDD.json)
     from datetime import datetime
     today_str = datetime.now().strftime('%Y%m%d')
-    filename = f'trade_{today_str}.json'
+    filename = f'ai_{today_str}.json'
 
     update_trade_ops_from_ai_file(filename)
 

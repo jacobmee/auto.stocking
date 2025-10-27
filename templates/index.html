@@ -491,9 +491,6 @@
             customStocks = window.loadCustomCodes() || [];
         }
         renderCustomStockList();
-        
-        const defaultBaseDate = document.getElementById('baseDateInput').value;
-        fetchData(defaultBaseDate, customStocks).then(renderChart);
     }
 
     initializeChart();
