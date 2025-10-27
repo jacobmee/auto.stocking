@@ -179,20 +179,21 @@ def update_trade_ops_from_ai_file(ai_trade_file, trade_ops_file="trade_ops.json"
         # Calculate total_value
         total_value = cash + sum(v["market_value"] for v in holdings.values())
 
-        # Use the last trade as trade_info for the snapshot
-        last_trade = real_trades[-1]
-        trade_info = {
-            "type": last_trade["type"],
-            "code": last_trade["code"],
-            "amount": last_trade["amount"],
-            "price": last_trade["price"],
-            "cost": round(last_trade["amount"] * last_trade["price"], 2)
-        }
+        # trade_info: 所有本次 real_trades 的交易都放入数组
+        trade_info = []
+        for trade in real_trades:
+            trade_info.append({
+                "type": trade["type"],
+                "code": trade["code"],
+                "amount": trade["amount"],
+                "price": trade["price"],
+                "cost": round(trade["amount"] * trade["price"], 2)
+            })
 
-        # Snapshot timestamp: use last trade date
-        snapshot_ts = last_trade["date"]
-        # Comment: use last trade comment
-        comment = last_trade.get("comment", "")
+        # Snapshot timestamp: 用最后一笔交易的日期
+        snapshot_ts = real_trades[-1]["date"]
+        # Comment: 用最后一笔交易的 comment
+        comment = real_trades[-1].get("comment", "")
 
         # Build snapshot
         snapshot = {

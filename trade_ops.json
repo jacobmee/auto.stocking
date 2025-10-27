@@ -2,12 +2,51 @@
   "transactions": [],
   "snapshots": [
     {
-      "timestamp": "2025-10-20 09:00:00",
-      "total_value": 10000.00,
-      "cash": 10000.00,
-      "trade_info": null,
-      "comment": "Portfolio initialized with starting capital.",
+      "timestamp": "2025-10-24 10:30:00",
+      "total_value": 100000.00,
+      "cash": 100000.00,
+      "trade_info": [
+        {
+          "type": "DEPOSIT",
+          "amount": 100000.00
+        }
+      ],
+      "comment": "初始资金注入",
       "holdings": {}
+    },
+    {
+      "timestamp": "2025-10-27 10:30:00",
+      "total_value": 99540.00,
+      "cash": 8950.00, 
+      "trade_info": [{
+        "type": "BUY",
+        "code": "000688.XSHG",
+        "amount": 30,
+        "price": 1480.00,
+        "cost": 44400.00
+      },
+      {
+        "type": "BUY",
+        "code": "000300.XSHG",
+        "amount": 10,
+        "price": 4695.00,
+        "cost": 46950.00
+      }],
+      "comment": "默认买入操作,因为比赛正式开始。一半的沪深300ETF，一半科创50ETF",
+      "holdings": {
+        "000688.XSHG": {
+          "shares": 30,
+          "cost_basis": 1470.00,
+          "current_price": 1464.00,
+          "market_value": 43920.00
+        },
+        "000300.XSHG": {
+          "shares": 10,
+          "cost_basis": 4695.00,
+          "current_price": 4697.00,
+          "market_value": 46970.00
+        }
+      }
     }
   ]
 }

@@ -1,6 +1,5 @@
 {
   "transactions": [
-    // [0] - 第一笔交易 (BUY)
     {
       "date": "2025-10-24 15:00:00",
       "type": "BUY",
@@ -9,7 +8,6 @@
       "price": 25.00,
       "comment": "同步大盘走势，缺乏独立行情信号，维持现有仓位跟随大盘操作"
     },
-    // [1] - 第二笔交易 (SELL) (新增)
     {
       "date": "2025-10-25 10:30:00",
       "type": "SELL",
@@ -20,27 +18,27 @@
     }
   ],
   "snapshots": [
-    // [0] - 初始快照 (不变)
     {
       "timestamp": "2025-10-20 09:00:00",
       "total_value": 10000.00,
       "cash": 10000.00,
-      "trade_info": null,
+  "trade_info": [],
       "comment": "Portfolio initialized with starting capital.",
       "holdings": {}
     },
-    // [1] - 第一次交易后的快照 (T1状态，假设此时也持有 01801)
     {
       "timestamp": "2025-10-24 15:00:00",
       "total_value": 10960.00,
       "cash": 9750.00,
-      "trade_info": {
-        "type": "BUY",
-        "code": "000688.XSHG",
-        "amount": 10,
-        "price": 25.00,
-        "cost": 250.00
-      },
+      "trade_info": [
+        {
+          "type": "BUY",
+          "code": "000688.XSHG",
+          "amount": 10,
+          "price": 25.00,
+          "cost": 250.00
+        }
+      ],
       "comment": "同步大盘走势...",
       "holdings": {
         "000688.XSHG": {
@@ -57,31 +55,30 @@
         }
       }
     },
-    // [2] - 第二次交易后的快照 (T2状态 - 新增)
     {
       "timestamp": "2025-10-25 10:30:00",
-      "total_value": 11250.00, // 现金 10000.00 + 市值 1250.00
-      "cash": 10000.00, // 9750 + 250
+      "total_value": 11250.00, 
+      "cash": 10000.00, 
       "trade_info": [{
         "type": "SELL",
         "code": "01801.HK",
         "amount": 5,
         "price": 50.00,
-        "cost": 250.00 // 交易发生金额
+        "cost": 250.00 
       }],
       "comment": "01801到达阻力位，减仓5股锁定部分利润。",
       "holdings": {
         "000688.XSHG": {
           "shares": 10,
           "cost_basis": 25.00,
-          "current_price": 50.00, // 市价更新
-          "market_value": 500.00 // 市值更新
+          "current_price": 50.00,
+          "market_value": 500.00  
         },
         "01801.HK": {
-          "shares": 15, // 20 - 5
-          "cost_basis": 45.00, // 平均成本不变 (FIFO/LIFO 会影响税务，但这里简化为不变)
-          "current_price": 50.00, // 市价更新
-          "market_value": 750.00 // 15 * 50.00
+          "shares": 15,   
+          "cost_basis": 45.00,
+          "current_price": 50.00,
+          "market_value": 750.00
         }
       }
     }

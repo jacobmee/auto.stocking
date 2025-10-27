@@ -249,98 +249,69 @@ def normalize_prices(prices, base_idx=0):
     return [1000 * v / base for v in prices]
 
 
-def get_value_line_with_prices(ops, code, frequency="60m", count=60, base_idx=0):
-    df = get_price_df(code, frequency=frequency, count=60)
-    logger.debug(f"DEBUG 市值主行情长度: {len(df) if df is not None else None}")
-    if df is not None:
-        logger.debug(
-            f"DEBUG 市值主行情时间区间: {df.index[0] if len(df) else None}, {df.index[-1] if len(df) else None}"
-        )
+def get_value_line_with_prices(snapshots, code, frequency="60m", count=60, base_idx=0):
+    import json as _json
+    # 以行情主线为基准
+    df = get_price_df(code, frequency=frequency, count=count)
     if df is None or len(df) == 0:
-        logger.debug("DEBUG 市值行情数据为空")
         return [], [], []
-    close = df["close"].values if df is not None else []
-    dates = df.index
-    value = []
-    value_prices = []
-    all_codes = set(op["code"] for op in ops)
-    code_close = {}
-    for c in all_codes:
-        dft = get_price_df(c, frequency=frequency, count=60)
-        logger.debug(f"DEBUG {c} 行情长度: {len(dft) if dft is not None else None}")
-        if dft is not None and len(dft):
-            logger.debug(f"DEBUG {c} 行情时间区间: {dft.index[0]}, {dft.index[-1]}")
-        # 确保 code_close[c] 的长度与 dates 长度一致，否则填充 0
-        code_close[c] = (
-            dft["close"].values
-            if dft is not None and len(dft) == len(dates)
-            else [0] * len(dates)
-        )
-    shares = {c: 0 for c in all_codes}
-    INIT_CASH_AMOUNT = 100000
-    cash = INIT_CASH_AMOUNT
-    op_idx = 0
-    # last_op_idx = 0 # 移除未使用的变量
-    for i, date in enumerate(dates):
-        comments = []
-        while op_idx < len(ops) and str(ops[op_idx]["date"]) <= str(date):
-            op = ops[op_idx]
-            c = op["code"]
-            # 确保操作的股票代码在 code_close 中有数据
-            if c in code_close and i < len(code_close[c]):
-                op_price = op["price"]
+    labels = [str(x) for x in df.index]
+    values = []
+    nodes = []
+    # 按时间升序排好快照
+    sorted_snaps = sorted(snapshots, key=lambda x: x.get('timestamp', ''))
+    snap_idx = 0
+    last_snapshot = None
+    for date in df.index:
+        # 找到该日或之前最近的snapshot
+        while snap_idx + 1 < len(sorted_snaps) and str(sorted_snaps[snap_idx + 1]['timestamp']) <= str(date):
+            snap_idx += 1
+        last_snapshot = sorted_snaps[snap_idx] if sorted_snaps else None
+        cash = last_snapshot.get('cash', 0) if last_snapshot else 0
+        holdings = last_snapshot.get('holdings', {}) if last_snapshot else {}
+        total = cash
+        holding_detail = {}
+        for stock_code, hinfo in holdings.items():
+            shares = hinfo.get('shares', 0)
+            # 必须始终用行情 close 值，不用 current_price 字段
+            price = 0
+            try:
+                stock_df = get_price_df(stock_code, frequency=frequency, count=count)
+                if stock_df is not None and len(stock_df) > 0:
+                    for t in reversed(stock_df.index):
+                        if str(t) <= str(date):
+                            price = float(stock_df.loc[t]['close'])
+                            break
+            except Exception:
+                price = 0
+            
+            logger.debug(f"  -> market_value: {shares} * {price} = {shares * price}")
+            total += shares * price
+            holding_detail[stock_code] = {
+                'shares': shares,
+                'price': price,
+                'value': round(shares * price, 2)
+            }
+        values.append(round(total, 2))
 
-                # 检查 op['price'] 是否合理，如果不合理使用当时的 close price
-                # 这里的逻辑是使用 op['price'] 进行交易，但如果 op['price'] 为 0 或缺失，
-                # 应该使用当前的 code_close[c][i] 来估算（但通常 op['price'] 是交易价格，不应随意修改）
-                # 保持原逻辑，假设 op['price'] 是交易发生时的价格
-
-                if op["type"] == "BUY":
-                    shares[c] += op["amount"]
-                    cash -= op["amount"] * op_price
-                elif op["type"] == "SELL":
-                    shares[c] -= op["amount"]
-                    cash += op["amount"] * op_price
-
-            if "comment" in op and op["comment"]:
-                comments.append(op["comment"])
-            op_idx += 1
-
-        stock_value = {c: shares[c] * code_close[c][i] for c in all_codes}
-        total_stock_value = sum(stock_value.values())
-        v = cash + total_stock_value
-        node = {
-            "total": round(v, 2),
-            "cash": round(cash, 2),
-            "stocks": {
-                c: {
-                    "shares": shares[c],
-                    "price": round(code_close[c][i], 2),
-                    "value": round(stock_value[c], 2),
-                }
-                for c in all_codes
-            },
-        }
-        # Ensure comments are added to the value_prices array
-        if comments:
-            existing_comment = node.get("comment", "")
-            node["comment"] = (
-                existing_comment + "\n" if existing_comment else ""
-            ) + "\n".join(comments)
-        value.append(v)
-        value_prices.append(node)
-
-    base = (
-        value[base_idx]
-        if value and 0 <= base_idx < len(value)
-        else (value[0] if value else 1)
-    )
-    if base == 0:
-        base = 1
-
-    norm = [1000 * v / base for v in value]
-    labels = [str(idx) for idx in dates]
-    return labels, norm, value_prices
+        # 只有当前日期完全匹配snapshot日期才注入详细信息，否则只保留total_value
+        if last_snapshot and str(last_snapshot.get('timestamp', '')) == str(date):
+            node = {
+                'date': str(date),
+                'codes': list(holdings.keys()),
+                'trade_info': last_snapshot.get('trade_info', []),
+                'comment': last_snapshot.get('comment', ''),
+                'holdings_detail': holding_detail,
+                'cash': cash,
+                'total_value': round(total, 2)
+            }
+        else:
+            node = {
+                'total_value': round(total, 2)
+            }
+          
+        nodes.append(node)
+    return labels, values, nodes
 
 @app.route("/api/lines")
 def api_lines():
@@ -447,20 +418,41 @@ def api_lines():
     price1_objs = build_price_objs(df1["close"].values if df1 is not None else [])
     price2_objs = build_price_objs(df2["close"].values if df2 is not None else [])
 
-    # 读取真实交易操作数据
+
+    # 读取Deepseek交易操作数据,然后加入节点/市值线计算
     try:
         with open("trade_ops.json", "r", encoding="utf-8") as f:
             trade_ops = json.load(f)
-            ops = trade_ops.get("transactions", [])
-            if not isinstance(ops, list) or not all(isinstance(op, dict) for op in ops):
+            snapshots = trade_ops.get("snapshots", [])
+            if not isinstance(snapshots, list) or not all(isinstance(snapshot, dict) for snapshot in snapshots):
                 raise ValueError(
-                    "The 'transactions' in trade_ops.json must be a list of dictionaries."
+                    "The 'snapshots' in trade_ops.json must be a list of dictionaries."
                 )
 
-        logger.info(f"交易数据 snapshots: {len(ops)} records.")
+        logger.info(f"交易数据 snapshots: {len(snapshots)} records.")
     except Exception as e:
         logger.error(f"Error loading or validating trade_ops.json: {e}")
-        ops = []  # Default to an empty list if validation fails
+        snapshots = []  # Default to an empty list if validation fails
+
+    # 市值线基准点索引与labels
+    base_idx3 = base_idx1  # 市值线与沪深300对齐
+    labels3, line3, value_prices = get_value_line_with_prices(
+        snapshots, "000300.XSHG", frequency="60m", count=60, base_idx=base_idx1
+    )
+
+    # 统一labels（优先沪深300，否则科创50，否则市值，否则第一个自定义）
+    labels = (
+        labels1 or labels2 or labels3 or (custom_labels[0] if custom_labels else [])
+    )
+
+    # 市值线归一化
+    if line3 and 0 <= base_idx3 < len(line3):
+        base3 = line3[base_idx3]
+        if base3 == 0:
+            base3 = 1
+        line3_rounded = [round(float(x) * 1000 / base3, 2) for x in line3]
+    else:
+        line3_rounded = [round(float(x), 2) for x in line3]
 
     # 读取今日点评
     today_data = {}
@@ -494,26 +486,6 @@ def api_lines():
         today_reviews = []  # Default to an empty list if validation fails
 
     logger.info(f"今日点评: {len(today_reviews)} 记录.")
-
-    # 市值线基准点索引与labels
-    base_idx3 = base_idx1  # 市值线与沪深300对齐
-    labels3, line3, value_prices = get_value_line_with_prices(
-        ops, "000300.XSHG", frequency="60m", count=60, base_idx=base_idx1
-    )
-
-    # 统一labels（优先沪深300，否则科创50，否则市值，否则第一个自定义）
-    labels = (
-        labels1 or labels2 or labels3 or (custom_labels[0] if custom_labels else [])
-    )
-
-    # 市值线归一化
-    if line3 and 0 <= base_idx3 < len(line3):
-        base3 = line3[base_idx3]
-        if base3 == 0:
-            base3 = 1
-        line3_rounded = [round(float(x) * 1000 / base3, 2) for x in line3]
-    else:
-        line3_rounded = [round(float(x), 2) for x in line3]
 
     # 示例调用 (假设 today_reviews, value_prices, price1_objs, price2_objs, labels 都已定义)
     # 假设 today_reviews = result_data.get('stock_view', [])
@@ -639,6 +611,9 @@ def api_lines():
         {"name": "科创50", "code": "000688.XSHG"},
         {"name": "Deepseek", "code": "Deepseek"},
     ] + custom_meta
+
+    logger.info(f"================== 数据分析结束 ==================")
+
     return jsonify(
         {
             "labels": labels,
