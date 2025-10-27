@@ -16,14 +16,14 @@ app = Flask(__name__)
 def setup_logger(name):
     """Configure and return a logger with syslog handler."""
     logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
 
     # Remove any existing handlers
     logger.handlers = []
 
     # Create syslog handler
     syslog_handler = logging.handlers.SysLogHandler(address='/dev/log')
-    syslog_handler.setLevel(logging.INFO)
+    syslog_handler.setLevel(logging.DEBUG)
 
     # Create formatter
     formatter = logging.Formatter('%(name)s: %(levelname)s - %(message)s')
@@ -111,6 +111,17 @@ def api_lines():
         except Exception as e:
             logger.error(f'写custom_code.json失败: {e}')
     
+    # 重新从 custom_code.json 读取 checked_codes，确保后续流程用的是最新文件内容
+    try:
+        with open('custom_code.json', 'r', encoding='utf-8') as f:
+            checked_codes = json.load(f)
+        logger.info(f"custom_code.json 重新读取自定义股票列表: {checked_codes}")
+    except Exception as e:
+        logger.error(f"重新读取 custom_code.json 失败: {e}")
+        checked_codes = []
+    
+    logger.info(f"最终使用的自定义股票列表: {checked_codes}")
+    
     # 查找基准点索引
     def get_base_idx(df, base_date):
         """根据 base_date 查找 DataFrame 中的时间索引，如果找不到返回 -1。"""
@@ -128,7 +139,15 @@ def api_lines():
     # 获取行情
     df1 = get_price_df('000300.XSHG', frequency='60m', count=60)
     df2 = get_price_df('000688.XSHG', frequency='60m', count=60)
-    custom_dfs = [get_price_df(code, frequency='60m', count=60) for code in checked_codes]
+    custom_dfs = []
+    for code in checked_codes:
+        logger.info(f"Fetching custom stock data for {code} (60m, 60 bars)...")
+        df = get_price_df(code, frequency='60m', count=60)
+        if df is not None and len(df):
+            logger.info(f"自定义股票: {code} fetched: {len(df)} rows.")
+        else:
+            logger.warning(f"自定义股票: {code} 无数据.")
+        custom_dfs.append(df)
     
     # 沪深300和科创50的归一化基准索引 (基于时间点)
     base_idx1 = get_base_idx(df1, base_date)
@@ -139,7 +158,15 @@ def api_lines():
     
     labels1 = [str(x) for x in df1.index] if df1 is not None else []
     labels2 = [str(x) for x in df2.index] if df2 is not None else []
-    custom_labels = [[str(x) for x in (df.index if df is not None else [])] for df in custom_dfs]
+    custom_labels = []
+    for idx, df in enumerate(custom_dfs):
+        if df is not None:
+            labels = [str(x) for x in df.index]
+            logger.info(f"自定义股票 Labels: {checked_codes[idx]} labels count: {len(labels)}")
+        else:
+            labels = []
+            logger.warning(f"自定义股票 Labels: {checked_codes[idx]} 无数据，labels 为空。")
+        custom_labels.append(labels)
     
     # 构造对象数组
     def build_price_objs(prices):
@@ -169,19 +196,45 @@ def api_lines():
         ops = []  # Default to an empty list if validation fails
         
     # 读取今日点评
+
     try:
-        with open('trade_today.json', 'r', encoding='utf-8') as f:
-            today_data = json.load(f)
-            today_reviews = today_data.get('stock_view', [])
-            if not isinstance(today_reviews, list) or not all(isinstance(review, dict) for review in today_reviews):
-                raise ValueError("The 'stock_view' in trade_today.json must be a list of dictionaries.")
+        from glob import glob
+        today_str = datetime.now().strftime('%Y%m%d')
+        filename = f'trade_{today_str}.json'
+        if os.path.exists(filename):
+            trade_file = filename
+        else:
+            # Search for the most recent trade_YYYY-MMDD.json in the last 10 days
+            found = False
+            for delta in range(1, 11):
+                prev_date = (datetime.now() - timedelta(days=delta)).strftime('%Y-%m%d')
+                prev_file = f'trade_{prev_date}.json'
+                if os.path.exists(prev_file):
+                    trade_file = prev_file
+                    found = True
+                    break
 
-            # Ensure each review in today_reviews has a valid timestamp
-            today_date = pd.Timestamp.now().strftime('%Y-%m-%d')
-            for review in today_reviews:
-                if 'timestamp' not in review or not review['timestamp']:
-                    review['timestamp'] = today_date  # Default to today's date if missing
+            if not found:
+                logger.warning('No recent trade_YYYYMMDD.json file found in the last 10 days.')
+                today_reviews = []
+                trade_file = None
 
+        if trade_file:
+            logger.info(f'Using trade file: {trade_file}')
+
+            with open(trade_file, 'r', encoding='utf-8') as f:
+                today_data = json.load(f)
+                today_reviews = today_data.get('stock_view', [])
+                if not isinstance(today_reviews, list) or not all(isinstance(review, dict) for review in today_reviews):
+                    raise ValueError("The 'stock_view' in trade_YYYY-MMDD.json must be a list of dictionaries.")
+
+                # Ensure each review in today_reviews has a valid timestamp
+                today_date = pd.Timestamp.now().strftime('%Y-%m-%d')
+                for review in today_reviews:
+                    if 'timestamp' not in review or not review['timestamp']:
+                        review['timestamp'] = today_date  # Default to today's date if missing
+        else:
+            today_reviews = []
     except Exception as e:
         logger.error(f"Error loading or validating today_reviews: {e}")
         today_reviews = []  # Default to an empty list if validation fails
@@ -384,7 +437,7 @@ def api_lines():
             price_objs = build_price_objs(price_aligned) # 使用修正后的 build_price_objs
             
             # 注入点评
-            inject_comments_to_price(price_objs, code, labels)
+            inject_comments_to_price(price_objs, code, labels, "")
             
             custom_lines.append(norm_aligned_rounded) # 使用包含 None 的 rounded 列表
             custom_prices.append(price_objs)
@@ -554,17 +607,6 @@ except Exception as e:
     logger.error(f"Error processing trade_today.json: {e}")
 
 
-def periodic_time_check():
-    while True:
-        try:
-            logger.info("Performing periodic time checking...")
-        except Exception as e:
-            logger.error(f"Error in periodic time_checking: {str(e)}")
-        time.sleep(60)
-
-# Start the periodic thread when the app starts
-threading.Thread(target=periodic_time_check, daemon=True).start()
-
 def run_daily_task_at(hour, minute, task_func):
     def scheduler():
         while True:
@@ -600,6 +642,7 @@ def my_daily_task():
     try:
         stock_manager = importlib.import_module('stock_manager')
         if hasattr(stock_manager, 'ask_deepseek'):
+            logger.warning('RUNNING: ask_deepseek daily task...')
             stock_manager.ask_deepseek()
         else:
             logger.warning('ask_deepseek not found in stock_manager.py')
