@@ -221,13 +221,20 @@ def inject_comments_to_price(price_arr, target_code, labels, today_reviews):
 
 
 def get_price_df(code, frequency="60m", count=60):
-    # 简单内存缓存，key为(code, frequency, count)
+    # 简单内存缓存，key为(code, frequency, count)，5分钟失效
+    import time
     if not hasattr(get_price_df, '_cache'):
         get_price_df._cache = {}
     cache = get_price_df._cache
     key = (code, frequency, count)
+    now = time.time()
+    # 缓存结构: {key: (df, timestamp)}
     if key in cache:
-        return cache[key]
+        df, ts = cache[key]
+        if now - ts < 300:  # 5分钟=300秒
+            return df
+        else:
+            del cache[key]
     
     try:
         from Ashare import get_price
@@ -240,7 +247,7 @@ def get_price_df(code, frequency="60m", count=60):
             logger.warning(f"No data returned for {code}.")
         else:
             logger.info(f"刷新股票代码 {code}: {len(df)} rows.")
-        cache[key] = df
+        cache[key] = (df, now)
         return df
     except Exception as e:
         logger.error(f"Error fetching data for {code}: {e}")
