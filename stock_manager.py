@@ -18,7 +18,6 @@ if not logger.hasHandlers():
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
-logger.setLevel(logging.INFO)
 
 def test_deepseek():
     # Test the Deepseek API integration

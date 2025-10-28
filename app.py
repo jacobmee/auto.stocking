@@ -79,6 +79,7 @@ def save_custom_codes():
 
 
 ## internal functions for /api/lines
+
 def get_latest_ai_file(max_days=10):
     """
     查找最新的 ai_YYYY-MMDD.json 文件，优先今天，否则回溯 max_days 天，找最近的一个。
@@ -89,7 +90,7 @@ def get_latest_ai_file(max_days=10):
     if os.path.exists(filename):
         return filename
     for delta in range(1, max_days + 1):
-        prev_date = (datetime.now() - timedelta(days=delta)).strftime("%Y-%m%d")
+        prev_date = (datetime.now() - timedelta(days=delta)).strftime("%Y%m%d")
         prev_file = f"ai_{prev_date}.json"
         if os.path.exists(prev_file):
             return prev_file
@@ -474,10 +475,9 @@ def api_lines():
     today_data = {}
     try:
         ai_file = get_latest_ai_file(max_days=10)
+        logger.info(f"最近AI数据: {ai_file}")
 
         if ai_file:
-            logger.info(f"最近AI数据: {ai_file}")
-
             with open(ai_file, "r", encoding="utf-8") as f:
                 today_data = json.load(f)
                 today_reviews = today_data.get("stock_view", [])
@@ -512,27 +512,19 @@ def api_lines():
 
     # Reorganize /api/lines to include Portfolio Analysis, Stock Operations, and Stock Views in tooltips
     for i, node in enumerate(value_prices):
-        # Embed Portfolio Analysis
-        if i == len(value_prices) - 1:  # Add Portfolio Analysis to the last time point
-            portfolio_comment = today_data.get("portfolio_analysis", {}).get(
-                "reasoning", ""
-            )
+        # Embed Portfolio Analysis（日期比对，只有日期完全匹配才注入）
+        pa = today_data.get("portfolio_analysis", {})
+        pa_date = pa.get("date", "")
+        if pa and pa_date and str(pa_date)[:16] == str(labels[i])[:16]:
+            portfolio_comment = pa.get("reasoning", "")
             if portfolio_comment:
                 node["portfolio_analysis"] = {
-                    "market_summary": today_data["portfolio_analysis"].get(
-                        "market_summary", ""
-                    ),
-                    "risk_level": today_data["portfolio_analysis"].get(
-                        "risk_level", ""
-                    ),
-                    "overall_operation": today_data["portfolio_analysis"].get(
-                        "overall_operation", ""
-                    ),
-                    "trading_plan": today_data["portfolio_analysis"].get(
-                        "trading_plan", ""
-                    ),
+                    "market_summary": pa.get("market_summary", ""),
+                    "risk_level": pa.get("risk_level", ""),
+                    "overall_operation": pa.get("overall_operation", ""),
+                    "trading_plan": pa.get("trading_plan", ""),
                     "portfolio_comment": portfolio_comment,
-                    "date": today_data["portfolio_analysis"].get("date", ""),
+                    "date": pa_date,
                 }
 
         # Embed Stock Operations
