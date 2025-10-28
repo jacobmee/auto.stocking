@@ -6,6 +6,8 @@ import os
 import json
 from openai import OpenAI
 import pandas as pd
+import re
+import subprocess
 
 # 调用 deepseek 函数
 from Ashare import get_price
@@ -118,44 +120,111 @@ def ask_deepseek():
 
     update_trade_ops_from_ai_file(filename)
 
-    # 发送邮件通知
-    try:
-        import subprocess
-        subject = f"AI.Stocking 日常报告 - {today_str}"
-        recipient = "jacob@mitang.me"
-        # 尝试将response_content格式化为可读性强的文本
-        try:
-            json_data = json.loads(response_content)
-            lines = []
-            # 标题
-            lines.append("auto.stocking AI 任务完成报告\n")
-            # stock_operations
-            if "stock_operations" in json_data:
-                lines.append("【操作建议】\n")
-                for op in json_data["stock_operations"]:
-                    lines.append(f"- 日期: {op.get('date','')}  类型: {op.get('type','')}  股票: {op.get('code','')}  数量: {op.get('amount','')}  价格: {op.get('price','')}  备注: {op.get('comment','')}")
-                lines.append("")
-            # comment
-            if "comment" in json_data:
-                lines.append(f"【AI 总结】\n{json_data['comment']}\n")
-            # portfolio_analysis
-            if "portfolio_analysis" in json_data:
-                lines.append("【组合分析】\n")
-                for pa in json_data["portfolio_analysis"]:
-                    lines.append(f"- 日期: {pa.get('date','')}  总市值: {pa.get('total_value','')}  持仓明细: {pa.get('holdings_detail','')}")
-                lines.append("")
-            mail_body = '\n'.join(lines)
-        except Exception as e:
-            mail_body = response_content  # fallback: 原始内容
-        # 调用mail命令发送邮件
-        process = subprocess.Popen([
-            'mail', '-s', subject, recipient
-        ], stdin=subprocess.PIPE)
-        process.communicate(input=mail_body.encode('utf-8'))
-        logger.info(f"Mail sent to {recipient}")
-    except Exception as e:
-        logger.error(f"Error sending mail: {e}")
+    send_report_email(filename)
 
+def send_report_email(filename):
+    """
+    读取AI结果文件，整理内容并发送邮件，主题自动带日期。
+    
+    Args:
+        filename (str): AI结果文件的路径。
+    """
+    # 显式定义收件人和发件人（与 msmtp 配置保持一致）
+    recipient = "jacob@mitang.me"
+    sender = "jacobmee@gmail.com" 
+
+    try:
+        # 1. 提取日期
+        # 假设 datetime 已在模块级别可用
+        m = re.search(r'ai_(\d{8})', filename)
+        date_str = m.group(1) if m else datetime.now().strftime('%Y%m%d')
+        subject = f"AI.Stocking 日常报告 - {date_str}"
+
+        # 2. 读取文件内容
+        with open(filename, 'r', encoding='utf-8') as f:
+            file_content = f.read()
+
+        mail_body = ""
+        try:
+            # 使用标准的 json.loads 进行解析
+            json_data = json.loads(file_content) 
+            # logger.info(f"Successfully parsed JSON from {filename}.")
+            
+            lines = []
+
+            # A. 处理 portfolio_analysis (字典结构)
+            if "portfolio_analysis" in json_data and isinstance(json_data["portfolio_analysis"], dict):
+                pa = json_data["portfolio_analysis"]
+                lines.append("*** 宏观/组合分析 ***\n")
+                lines.append(f"日期: {pa.get('date', 'N/A')}")
+                lines.append(f"风险级别: {pa.get('risk_level', 'N/A')}")
+                lines.append(f"总体操作: {pa.get('overall_operation', 'N/A')}")
+                lines.append("-" * 20)
+                lines.append(f"市场总结:\n{pa.get('market_summary', '无')}\n")
+                lines.append(f"交易计划:\n{pa.get('trading_plan', '无')}\n")
+                lines.append(f"决策依据:\n{pa.get('reasoning', '无')}\n")
+                lines.append("")
+
+            # B. 处理 stock_operations (列表结构)
+            if "stock_operations" in json_data and isinstance(json_data["stock_operations"], list):
+                lines.append("【操作建议】")
+                if not json_data["stock_operations"]:
+                    lines.append("本日无具体交易操作建议。")
+                else:
+                    for op in json_data["stock_operations"]:
+                        lines.append(f"- 日期: {op.get('date','N/A')} | 类型: {op.get('type','N/A')} | 股票: {op.get('code','N/A')} | 数量: {op.get('amount','N/A')} | 价格: {op.get('price','N/A')} | 备注: {op.get('comment','')}")
+                lines.append("")
+
+            # C. 处理 stock_view (列表结构)
+            if "stock_view" in json_data and isinstance(json_data["stock_view"], list):
+                lines.append("【个股/指数观点】")
+                for sv in json_data["stock_view"]:
+                    lines.append(f"- {sv.get('code','N/A')} ({sv.get('operation','N/A')}): {sv.get('view','无观点')}")
+                lines.append("")
+
+            mail_body = '\n'.join(lines)
+            # logger.info("Prepared email body from JSON data.")
+            
+        except Exception as e:
+            # logger.error(f"JSON decode error for {filename}: {e}")
+            mail_body = file_content  # fallback: 原始内容
+
+        # 3. 发送邮件
+        # **修改**: 在 msmtp 调用中加入 --debug 标志
+        
+        # 构造完整的邮件头（RFC 822 格式）
+        full_headers = [
+            f"Date: {datetime.now().strftime('%a, %d %b %Y %H:%M:%S +0000')}", 
+            f"Subject: {subject}",
+            f"From: {sender}",
+            f"To: {recipient}",
+            "Content-Type: text/plain; charset=utf-8", 
+            "", # 必需的空行，分隔头部和正文
+        ]
+        
+        full_message = '\n'.join(full_headers) + '\n' + mail_body
+        
+        # logger.info("Sending email via msmtp...")
+        process = subprocess.Popen([
+            '/usr/bin/msmtp', recipient
+        ], stdin=subprocess.PIPE)
+        
+        # 将完整的邮件（包含头部和正文）发送给 msmtp
+        process.communicate(input=full_message.encode('utf-8'))
+        
+        # 检查 msmtp 的退出状态码
+        if process.returncode != 0:
+            # 在非零状态时，打印更详细的错误信息
+            error_msg = f"/usr/bin/msmtp failed with status code {process.returncode}. Check msmtp debug output above for details."
+            # logger.error(error_msg)
+            raise Exception(error_msg)
+
+        # logger.info(f"Mail sent to {recipient}")
+        print(f"邮件已发送至 {recipient}，主题：{subject}") # 终端确认
+        
+    except Exception as e:
+        # logger.error(f"Error sending mail: {e}")
+        print(f"发送邮件时发生错误: {e}") # 终端错误输出
 
 def update_trade_ops_from_ai_file(ai_trade_file, trade_ops_file="trade_ops.json"):
     """
@@ -279,7 +348,8 @@ def main():
     logger.info("Running deepseek from main...")
     try:
         #test_deepseek()
-        ask_deepseek()
+        #ask_deepseek()
+        send_report_email("ai_20251028.json")
         #update_trade_ops_from_ai_file("ai_20251028.json")
     except Exception as e:
         logger.error(f"Error in main calling deepseek: {e}")
