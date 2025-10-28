@@ -118,6 +118,44 @@ def ask_deepseek():
 
     update_trade_ops_from_ai_file(filename)
 
+    # 发送邮件通知
+    try:
+        import subprocess
+        subject = f"AI.Stocking 日常报告 - {today_str}"
+        recipient = "jacob@mitang.me"
+        # 尝试将response_content格式化为可读性强的文本
+        try:
+            json_data = json.loads(response_content)
+            lines = []
+            # 标题
+            lines.append("auto.stocking AI 任务完成报告\n")
+            # stock_operations
+            if "stock_operations" in json_data:
+                lines.append("【操作建议】\n")
+                for op in json_data["stock_operations"]:
+                    lines.append(f"- 日期: {op.get('date','')}  类型: {op.get('type','')}  股票: {op.get('code','')}  数量: {op.get('amount','')}  价格: {op.get('price','')}  备注: {op.get('comment','')}")
+                lines.append("")
+            # comment
+            if "comment" in json_data:
+                lines.append(f"【AI 总结】\n{json_data['comment']}\n")
+            # portfolio_analysis
+            if "portfolio_analysis" in json_data:
+                lines.append("【组合分析】\n")
+                for pa in json_data["portfolio_analysis"]:
+                    lines.append(f"- 日期: {pa.get('date','')}  总市值: {pa.get('total_value','')}  持仓明细: {pa.get('holdings_detail','')}")
+                lines.append("")
+            mail_body = '\n'.join(lines)
+        except Exception as e:
+            mail_body = response_content  # fallback: 原始内容
+        # 调用mail命令发送邮件
+        process = subprocess.Popen([
+            'mail', '-s', subject, recipient
+        ], stdin=subprocess.PIPE)
+        process.communicate(input=mail_body.encode('utf-8'))
+        logger.info(f"Mail sent to {recipient}")
+    except Exception as e:
+        logger.error(f"Error sending mail: {e}")
+
 
 def update_trade_ops_from_ai_file(ai_trade_file, trade_ops_file="trade_ops.json"):
     """
@@ -133,6 +171,7 @@ def update_trade_ops_from_ai_file(ai_trade_file, trade_ops_file="trade_ops.json"
         if not real_trades:
             logger.info(f"No real trades in {ai_trade_file}, trade_ops.json not updated.")
             return False
+
 
         # Load current trade_ops.json
         if os.path.exists(trade_ops_file):
@@ -229,6 +268,7 @@ def update_trade_ops_from_ai_file(ai_trade_file, trade_ops_file="trade_ops.json"
         with open(trade_ops_file, "w", encoding="utf-8") as f:
             json.dump(trade_ops, f, ensure_ascii=False, indent=4)
         logger.info(f"trade_ops.json updated with {len(real_trades)} trades and new snapshot from {ai_trade_file}.")
+
         return True
     except Exception as e:
         logger.error(f"Error updating trade_ops.json from {ai_trade_file}: {e}")
