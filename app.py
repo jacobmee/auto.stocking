@@ -660,15 +660,15 @@ def run_daily_task_at(hour, minute, task_func):
 import importlib
 
 
-def my_daily_task():
+def quick_stocking():
     try:
-        stock_manager = importlib.import_module("stock_manager")
-        if hasattr(stock_manager, "test_deepseek"):
-            stock_manager.test_deepseek()
+        qs = importlib.import_module("quick_stocking")
+        if hasattr(qs, "main"):
+            qs.main()
         else:
-            logger.warning("test_deepseek not found in stock_manager.py")
+            logger.warning("main not found in quick_stocking.py")
     except Exception as e:
-        logger.error(f"Error running test_deepseek: {e}")
+        logger.error(f"Error running quick_stocking: {e}")
 
 
 # 每天下午 14:15 执行 ask_deepseek
@@ -685,6 +685,7 @@ def my_daily_task():
 
 
 run_daily_task_at(14, 15, my_daily_task)
+run_daily_task_at(22, 15, quick_stocking)
 
 if __name__ == "__main__":
     app.run(debug=True, port=5005, host="0.0.0.0")
