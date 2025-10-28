@@ -1,6 +1,7 @@
 from copy import deepcopy
 from datetime import datetime
 import logging
+import logging.handlers
 import os
 import json
 from openai import OpenAI
@@ -9,14 +10,33 @@ import pandas as pd
 # 调用 deepseek 函数
 from Ashare import get_price
 from openai import OpenAI
-    
-# Setup logger for this module
-logger = logging.getLogger("STOCK.MANAGER")
-if not logger.hasHandlers():
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+
+def setup_logger(name):
+    """Configure and return a logger with syslog handler."""
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+
+    # Remove any existing handlers
+    logger.handlers = []
+
+    # Create syslog handler
+    syslog_handler = logging.handlers.SysLogHandler(address="/dev/log")
+    syslog_handler.setLevel(logging.INFO)
+
+    # Create formatter
+    formatter = logging.Formatter("%(name)s: %(levelname)s - %(message)s")
+    syslog_handler.setFormatter(formatter)
+
+    # Add handler to logger
+    logger.addHandler(syslog_handler)
+
+    # Prevent propagation to root logger
+    logger.propagate = False
+
+    return logger
+
+logger = setup_logger("STOCK.MANAGER")
+
 
 
 def test_deepseek():
@@ -86,8 +106,6 @@ def ask_deepseek():
     today_str = datetime.now().strftime('%Y%m%d')
     filename = f'ai_{today_str}.json'
 
-    update_trade_ops_from_ai_file(filename)
-
     try:
         with open(filename, 'w', encoding='utf-8') as f:
             response_content = response.choices[0].message.content
@@ -97,6 +115,8 @@ def ask_deepseek():
         logger.info(f"Response saved to {filename}")
     except Exception as e:
         logger.error(f"Error saving response to {filename}: {e}")
+
+    update_trade_ops_from_ai_file(filename)
 
 
 def update_trade_ops_from_ai_file(ai_trade_file, trade_ops_file="trade_ops.json"):
@@ -216,11 +236,13 @@ def update_trade_ops_from_ai_file(ai_trade_file, trade_ops_file="trade_ops.json"
     
 def main():
     """Run ask_deepseek from command line."""
-    logger.info("Running ask_deepseek from main...")
+    logger.info("Running deepseek from main...")
     try:
+        #test_deepseek()
         ask_deepseek()
+        #update_trade_ops_from_ai_file("ai_20251028.json")
     except Exception as e:
-        logger.error(f"Error in main calling ask_deepseek: {e}")
+        logger.error(f"Error in main calling deepseek: {e}")
 
 if __name__ == "__main__":
     main()
