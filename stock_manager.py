@@ -66,6 +66,7 @@ def ask_deepseek():
     else:
         raise FileNotFoundError("The prompt.md file is not found. Please ensure it exists in the current directory.")
 
+
     # Fetch and include data for 沪深300指数
     hs300_df = get_price('000300.XSHG', frequency='60m', count=60)  # 支持'1d'日, '1w'周, '1M'月
     message = f"\n沪深300指数 小时线行情\n{hs300_df}"
@@ -73,6 +74,26 @@ def ask_deepseek():
     # Fetch and include data for 科创指数
     kc_df = get_price('000688.XSHG', frequency='60m', count=60)  # 支持'1m','5m','15m','30m','60m'
     message += f"\n科创指数 小时线行情\n{kc_df}"
+
+    # 动态读取 custom_code.json 并加入 message，并获取每只股票的行情
+    custom_codes = []
+    custom_code_file = "custom_code.json"
+    if os.path.exists(custom_code_file):
+        try:
+            with open(custom_code_file, "r", encoding="utf-8") as f:
+                custom_codes = json.load(f)
+        except Exception as e:
+            logger.error(f"Error reading custom_code.json: {e}")
+
+    message += f"\n同时建议这些股票的操作意见：000300.XSHG, 000688.XSHG"
+    if custom_codes:
+        message += f", {', '.join(custom_codes)}\n"
+        for code in custom_codes:
+            try:
+                code_df = get_price(code, frequency='60m', count=60)
+                message += f"\n{code} 小时线行情\n{code_df}"
+            except Exception as e:
+                logger.error(f"Error fetching price for {code}: {e}")
 
     # Load trade operations from trade_ops.json
     trade_ops_file = "trade_ops.json"
@@ -84,7 +105,7 @@ def ask_deepseek():
         trade_ops_json_string = "{}"  # Default to empty JSON if file does not exist
 
     message += f"\n你的仓位和交易记录在这里:\n{trade_ops_json_string}"
-    message += f"\n现在告诉我你的买卖决策，按照这个json文件的格式给我输出"
+    message += f"\n现在告诉我你的买卖决策(只能买卖000300.XSHG和000688.XSHG)，按照这个json文件的格式给我输出"
 
     logger.info("Sending prompt to Deepseek:")
     logger.info(prompt_content)
@@ -348,8 +369,8 @@ def main():
     logger.info("Running deepseek from main...")
     try:
         #test_deepseek()
-        #ask_deepseek()
-        send_report_email("ai_20251028.json")
+        ask_deepseek()
+        #send_report_email("ai_20251028.json")
         #update_trade_ops_from_ai_file("ai_20251028.json")
     except Exception as e:
         logger.error(f"Error in main calling deepseek: {e}")

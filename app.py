@@ -389,11 +389,9 @@ def api_lines():
     df2 = get_price_df("000688.XSHG", frequency="60m", count=60)
     custom_dfs = []
     for code in checked_codes:
-        logger.info(f"Fetching custom stock data for {code} (60m, 60 bars)...")
+        logger.debug(f"Fetching custom stock data for {code} (60m, 60 bars)...")
         df = get_price_df(code, frequency="60m", count=60)
-        if df is not None and len(df):
-            logger.info(f"自定义股票: {code} fetched: {len(df)} rows.")
-        else:
+        if df is None or len(df) == 0:
             logger.warning(f"自定义股票: {code} 无数据.")
         custom_dfs.append(df)
 
@@ -410,7 +408,7 @@ def api_lines():
     for idx, df in enumerate(custom_dfs):
         if df is not None:
             labels = [str(x) for x in df.index]
-            logger.info(
+            logger.debug(
                 f"自定义股票 Labels: {checked_codes[idx]} labels count: {len(labels)}"
             )
         else:
@@ -603,7 +601,7 @@ def api_lines():
             )  # 使用修正后的 build_price_objs
 
             # 注入点评
-            inject_comments_to_price(price_objs, code, labels, "")
+            inject_comments_to_price(price_objs, code, labels, today_reviews)
 
             custom_lines.append(norm_aligned_rounded)  # 使用包含 None 的 rounded 列表
             custom_prices.append(price_objs)
