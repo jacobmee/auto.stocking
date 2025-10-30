@@ -67,10 +67,12 @@ def ask_deepseek(stock_code, email_recipient):
         print(error_msg)
         raise Exception(error_msg)
 
-    
-def main():
+def run():
     """Run ask_deepseek from command line."""
     ask_deepseek("QQQ","jacob@mitang.me")
+
+def main():
+    """Run ask_deepseek from command line."""
 
 if __name__ == "__main__":
     main()

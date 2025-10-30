@@ -661,10 +661,10 @@ import importlib
 def quick_stocking():
     try:
         qs = importlib.import_module("quick_stocking")
-        if hasattr(qs, "main"):
-            qs.main()
+        if hasattr(qs, "run"):
+            qs.run()
         else:
-            logger.warning("main not found in quick_stocking.py")
+            logger.warning("run not found in quick_stocking.py")
     except Exception as e:
         logger.error(f"Error running quick_stocking: {e}")
 
@@ -682,7 +682,11 @@ def my_daily_task():
         logger.error(f"Error running ask_deepseek: {e}")
 
 
-run_daily_task_at(14, 15, my_daily_task)
+run_daily_task_at(10, 15, my_daily_task)
+run_daily_task_at(11, 15, my_daily_task)
+run_daily_task_at(13, 45, my_daily_task)
+run_daily_task_at(14, 45, my_daily_task)
+run_daily_task_at(15, 45, my_daily_task)
 run_daily_task_at(22, 15, quick_stocking)
 
 if __name__ == "__main__":

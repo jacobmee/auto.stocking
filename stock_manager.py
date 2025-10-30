@@ -69,11 +69,11 @@ def ask_deepseek():
 
     # Fetch and include data for 沪深300指数
     hs300_df = get_price('000300.XSHG', frequency='60m', count=60)  # 支持'1d'日, '1w'周, '1M'月
-    message = f"\n沪深300指数 小时线行情\n{hs300_df}"
+    message = f"\n000300.XSHG 小时线行情\n{hs300_df}\n\n"
 
     # Fetch and include data for 科创指数
     kc_df = get_price('000688.XSHG', frequency='60m', count=60)  # 支持'1m','5m','15m','30m','60m'
-    message += f"\n科创指数 小时线行情\n{kc_df}"
+    message += f"\n000688.XSHG 小时线行情\n{kc_df}\n\n"
 
     # 动态读取 custom_code.json 并加入 message，并获取每只股票的行情
     custom_codes = []
@@ -84,14 +84,13 @@ def ask_deepseek():
                 custom_codes = json.load(f)
         except Exception as e:
             logger.error(f"Error reading custom_code.json: {e}")
+            custom_codes = []
 
-    message += f"\n同时建议这些股票的操作意见：000300.XSHG, 000688.XSHG"
     if custom_codes:
-        message += f", {', '.join(custom_codes)}\n"
         for code in custom_codes:
             try:
                 code_df = get_price(code, frequency='60m', count=60)
-                message += f"\n{code} 小时线行情\n{code_df}"
+                message += f"\n{code} 小时线行情\n{code_df}\n\n"
             except Exception as e:
                 logger.error(f"Error fetching price for {code}: {e}")
 
@@ -105,7 +104,44 @@ def ask_deepseek():
         trade_ops_json_string = "{}"  # Default to empty JSON if file does not exist
 
     message += f"\n你的仓位和交易记录在这里:\n{trade_ops_json_string}"
-    message += f"\n现在告诉我你的买卖决策(只能买卖000300.XSHG和000688.XSHG)，按照这个json文件的格式给我输出"
+
+    # 获取000300.XSHG和000688.XSHG的最新close价
+    hs300_close = None
+    kc_close = None
+    try:
+        if hs300_df is not None and len(hs300_df) > 0:
+            hs300_close = hs300_df.iloc[-1]["close"]
+    except Exception as e:
+        logger.error(f"Error getting 000300.XSHG close: {e}")
+    try:
+        if kc_df is not None and len(kc_df) > 0:
+            kc_close = kc_df.iloc[-1]["close"]
+    except Exception as e:
+        logger.error(f"Error getting 000688.XSHG close: {e}")
+
+    price_str = ""
+    if hs300_close is not None and kc_close is not None:
+        price_str = f"\n当前价格：000300.XSHG={hs300_close}，000688.XSHG={kc_close}"
+    elif hs300_close is not None:
+        price_str = f"\n当前价格：000300.XSHG={hs300_close}"
+    elif kc_close is not None:
+        price_str = f"\n当前价格：000688.XSHG={kc_close}"
+
+    message += f"\n第一步：现在告诉我你的买卖决策(只能买卖000300.XSHG和000688.XSHG){price_str}"
+    
+    result_file = "result.json"
+    if os.path.exists(result_file):
+        with open(result_file, "r", encoding="utf-8") as file:
+            result_data = json.load(file)
+            result_data = json.dumps(result_data, ensure_ascii=False, indent=4)
+    else:
+        result_data = "{}"  # Default to empty JSON if file does not exist
+
+    message += f"\n第二步：发表对这些股票的review：000300.XSHG, 000688.XSHG"
+    if custom_codes:
+        message += f", {', '.join(custom_codes)}\n"
+
+    message += f"\n第三步：按照这个{result_data}的格式输出"
 
     logger.info("Sending prompt to Deepseek:")
     logger.info(prompt_content)
@@ -279,19 +315,35 @@ def update_trade_ops_from_ai_file(ai_trade_file, trade_ops_file="trade_ops.json"
 
         # Append new transactions
         for op in real_trades:
-            trade_ops["transactions"].append({
-                "date": op["date"],
-                "type": op["type"],
-                "code": op["code"],
-                "amount": op["amount"],
-                "price": op["price"],
-                "comment": op.get("comment", "")
-            })
-
             code = op["code"]
             amount = op["amount"]
             price = op["price"]
             ttype = op["type"].upper()
+            date = op["date"]
+            # 检查price是否在open/close之间
+            try:
+                df = get_price(code, frequency='60m', count=60)
+                if df is not None and len(df) > 0:
+                    row = df.iloc[-1]
+                    open_p = float(row["open"])
+                    close_p = float(row["close"])
+                    min_p, max_p = min(open_p, close_p), max(open_p, close_p)
+                    if not (min_p <= price <= max_p):
+                        logger.warning(f"Trade for {code} at {date} price {price} not in open/close range ({open_p}, {close_p}), skipped.")
+                        continue
+            except Exception as e:
+                logger.error(f"价格错误 price range for {code} at {date}: {e}")
+                continue
+
+            trade_ops["transactions"].append({
+                "date": date,
+                "type": op["type"],
+                "code": code,
+                "amount": amount,
+                "price": price,
+                "comment": op.get("comment", "")
+            })
+
             # Update holdings and cash
             if ttype == "BUY":
                 # Update or create holding
