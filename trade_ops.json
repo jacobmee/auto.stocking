@@ -1,18 +1,50 @@
 {
-  "transactions": [],
-  "snapshots": [
-    {
-      "timestamp": "2025-10-24 10:30:00",
-      "total_value": 100000.00,
-      "cash": 100000.00,
-      "trade_info": [
+    "transactions": [
         {
-          "type": "DEPOSIT",
-          "amount": 100000.00
+            "date": "2025-10-31 15:00:00",
+            "type": "BUY",
+            "code": "000300.XSHG",
+            "amount": 5,
+            "price": 4640.668,
+            "comment": "轻仓买入在关键支撑位4640，基于长期趋势未破且风险可控，设止损4600"
         }
-      ],
-      "comment": "初始资金注入",
-      "holdings": {}
-    }
-  ]
+    ],
+    "snapshots": [
+        {
+            "timestamp": "2025-10-24 10:30:00",
+            "total_value": 100000.0,
+            "cash": 100000.0,
+            "trade_info": [
+                {
+                    "type": "DEPOSIT",
+                    "amount": 100000.0
+                }
+            ],
+            "comment": "初始资金注入",
+            "holdings": {}
+        },
+        {
+            "timestamp": "2025-10-31 15:00:00",
+            "total_value": 100000.0,
+            "cash": 76796.66,
+            "trade_info": [
+                {
+                    "type": "BUY",
+                    "code": "000300.XSHG",
+                    "amount": 5,
+                    "price": 4640.668,
+                    "cost": 23203.34
+                }
+            ],
+            "comment": "轻仓买入在关键支撑位4640，基于长期趋势未破且风险可控，设止损4600",
+            "holdings": {
+                "000300.XSHG": {
+                    "shares": 5,
+                    "cost_basis": 4640.668,
+                    "current_price": 4640.668,
+                    "market_value": 23203.339999999997
+                }
+            }
+        }
+    ]
 }

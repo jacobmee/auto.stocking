@@ -645,6 +645,11 @@ def run_daily_task_at(hour, minute, task_func):
                 next_run += timedelta(days=1)
             sleep_seconds = (next_run - now).total_seconds()
             time.sleep(sleep_seconds)
+            # 跳过周六(5)和周日(6)
+            weekday = next_run.weekday()  # 0=Monday, ..., 5=Saturday, 6=Sunday
+            if weekday >= 5:
+                logger.info(f"Scheduled task skipped on weekend (weekday={weekday})")
+                continue
             try:
                 task_func()
             except Exception as e:
