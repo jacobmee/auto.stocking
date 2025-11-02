@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>AI.Stocking</title>
+    <title>AI.Trade</title>
     <link href="https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
@@ -59,13 +59,11 @@
     <div id="customStockArea" style="margin:32px auto 0 auto;max-width:1200px;background:rgba(255,255,255,0.92);padding:12px 18px 14px 18px;border-radius:8px;box-shadow:0 1px 8px rgba(0,0,0,0.06);font-family:'Lato',Arial,sans-serif;font-size:13px;">
         <div style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px 16px;">
             <div style="flex:1 1 0;min-width:320px;">
-                <div style="margin-bottom:2px;font-weight:bold;">自定义股票(最多5个):</div>
                 <div style="display:flex;align-items:center;flex-wrap:wrap;gap:12px 16px;">
+                    <span style="font-weight:bold;white-space:nowrap;">自定义股票(最多5个):</span>
                     <div id="customStockList" style="display:flex;align-items:center;flex-wrap:wrap;gap:8px 8px;"></div>
-                    <div style="display:flex;align-items:center;gap:6px;">
-                        <input id="customStockInput" type="text" maxlength="12" placeholder="sh600000" style="width:90px;font-size:13px;">
-                        <button id="addCustomStockBtn" style="font-size:13px;">添加</button>
-                    </div>
+                    <input id="customStockInput" type="text" maxlength="12" placeholder="sh600000" style="width:90px;font-size:13px;">
+                    <button id="addCustomStockBtn" style="font-size:13px;">添加</button>
                 </div>
             </div>
             <div id="baseDateDiv" style="display:flex;align-items:center;gap:8px;font-size:13px;min-width:220px;">
