@@ -141,7 +141,7 @@ def ask_deepseek():
     if custom_codes:
         message += f", {', '.join(custom_codes)}\n"
 
-    message += f"\n第三步：按照这个{result_data}的格式输出"
+    message += f"\n第三步：按照这个{result_data}的格式输出,而且内容只包括这个json文件，不含其他内容。"
 
     logger.info("Sending prompt to Deepseek:")
     logger.info(prompt_content)
